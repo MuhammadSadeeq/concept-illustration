@@ -1,0 +1,16 @@
+{
+  "name": "concept-illustration",
+  "version": "1.0.0",
+  "private": true,
+  "description": "An agent skill that turns ideas into polished isometric illustrations that move.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "node dev/test.mjs",
+    "gallery": "node dev/build-gallery.mjs",
+    "list": "node skills/concept-illustration/scripts/build.mjs --list"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,11 @@
+node_modules/
+.DS_Store
+*.log
+
+# build outputs written next to scene scripts while working on examples
+skills/concept-illustration/examples/*.svg
+skills/concept-illustration/examples/*.html
+skills/concept-illustration/examples/*.png
+skills/concept-illustration/examples/*.mp4
+skills/concept-illustration/examples/*.gif
+skills/concept-illustration/examples/*.webm
