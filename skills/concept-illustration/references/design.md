@@ -206,6 +206,8 @@ Choose it when the idea is a *behaviour* that has a physical cousin (filter, gat
 
 A vignette is not a smaller diagram. If the idea has three named actors exchanging things, it is a scene, and labels will serve it better.
 
+**Working models.** Science and engineering subjects often need both: the machine itself, moving truthfully, and the names of its parts. Build the machine as a custom object with real moving parts, stand it in a scene, name whole objects with labels and parts of the machine with `s.callout`, and let two to four captions walk through the cause and effect. Get the relationships right before the polish: what turns together shares a period, what peaks together shares a phase, and what is zero at the same instant starts at the same instant. A model that moves correctly teaches even with the captions off.
+
 ## Variety
 
 Sameness is the commonest failure of generated illustration. Guard against it deliberately.

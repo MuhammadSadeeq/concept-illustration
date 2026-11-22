@@ -176,6 +176,31 @@ throws('a builder must return parts', () => { const s = iso.scene({}); s.define(
   ok('moving parts scale with the object', big.parts[1].anim.by[2] === 2);
 }
 
+// working models: orbiting parts, alternating flow, light, callouts, custom objects in story steps
+{
+  const { scene } = iso;
+  const s = scene({ look: 'ocean', title: 'Model', loop: 6 });
+  s.define('spinner', (o, sh) => ({ parts: [
+    sh.box({ w: 1, d: 1, h: 0.3, color: o.color }),
+    sh.prism({ plane: 'right', at: [-0.5, 0, 1.2], outline: sh.outline.circle(0.05), depth: 1, color: 'gold', anim: { type: 'orbit', axis: 'x', r: 0.5, from: 90, period: 3 } }),
+    sh.wire({ points: [[0, -1, 1], [0, 1, 1]], color: '#ffffff', dash: '2 6', opacity: 0.5, anim: { type: 'march', period: 1.5, len: 8, alternate: true } }),
+    sh.glow({ z: 1.2, r: 1, color: 'gold', anim: { type: 'blink', period: 1.5 } }),
+  ] }));
+  const a = s.add('spinner', { at: [0, 0], label: 'A', hero: true }), b = s.add('cube', { at: [4.5, 0], label: 'B' });
+  s.link(a, b, { arrow: false, flow: { alternate: true, period: 3 } });
+  s.callout([0, 0, 1.8], 'Part', { rise: 40, length: 50 });
+  s.story([s.say('A custom object takes every story step'), s.tint(a, 'ok'), s.pulse(a), s.wait(1)]);
+  const r = s.build();
+  ok('orbit compiles to two opposite turns', /rotate\(360deg\)/.test(r.svg) && /rotate\(-360deg\)/.test(r.svg) && /rotate\(90\)"><g style=/.test(r.svg));
+  ok('alternating march', /infinite alternate both/.test(r.svg));
+  ok('alternating flow moves dots both ways', (r.svg.match(/<circle r="2.6"/g) || []).length >= 2);
+  ok('glow shape draws a light', /<radialGradient[^>]*><stop offset="0" stop-color="#ffffff"/.test(r.svg));
+  ok('shape opacity', r.svg.includes('<g opacity="0.5">'));
+  ok('a custom object can be tinted', !r.notes.some((n) => n.level === 'warn'));
+  ok('callout with rise', /<path d="M[-\d.]+ [-\d.]+L[-\d.]+ [-\d.]+H[-\d.]+"/.test(r.svg));
+  ok('dark looks are marked for review sheets', r.svg.includes('data-dark="1"'));
+}
+
 // every example must be well-formed XML: used as <img>, an SVG is parsed strictly
 {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-xml-'));

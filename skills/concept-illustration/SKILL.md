@@ -154,6 +154,7 @@ The accent colour belongs to the hero. Where a supporting object shows a lot of 
 
 - `at: [x, y]` is the centre of an object, in grid cells. A row along `x` runs from the upper-left of the picture to the lower-right, the way people read. Use `y` for parallel lanes.
 - Centres **4 to 5 cells apart**; under 3 they collide. Linked objects share an `x` or a `y` so links run straight.
+- More than four in one row makes a long thin picture. Turn the row into an L or a U, or use two lanes, so the frame stays near 4:3 or 16:9.
 - **Three depths.** Tall or scenic things at the back (small `x + y`), the actors in the middle, low things and tokens in front. Nothing hides anything.
 - **Height is hierarchy.** Stand the hero on a `platform`; float information (`browser`, `bubble`, `cloud`) above the floor with `z`.
 - **A sense of place.** One to three unlabelled scenery objects (`tree`, `building`, `cloud`, your own) tell where this happens. Keep them clear of links.
@@ -165,7 +166,7 @@ The accent colour belongs to the hero. Where a supporting object shows a lot of 
 s.link(a, b)                                  // solid line, arrowhead at b, a small socket at a
 s.link(a, b, { style: 'dashed' })             // 'line' | 'dashed' | 'dotted' | 'pipe' | 'road'
 s.link(a, b, { arrow: 'both' })               // true | 'both' | false
-s.link(a, b, { flow: true })                  // dots stream along it forever
+s.link(a, b, { flow: true })                  // dots stream along it forever ('alternate': they rock to and fro)
 s.link(a, b, { route: 'straight' })           // 'auto' | 'x' | 'y' | 'straight'   (or via: [[x, y], ...])
 s.link(a, b, { arc: true })                   // a hop through the air
 s.link(a, b, { label: 'HTTPS', dim: true })   // small caption; dim fades a secondary link
@@ -217,6 +218,7 @@ node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --png --at 3             # one
 ```
 
 - An error names the line of your script and suggests the fix.
+- Custom objects take every story step and option that built-in ones do (`hero`, `s.tint`, `s.grow`, `as:` in `s.send`).
 - **FIX THESE** are defects: resolve all. **CONSIDER** are judgement calls: act unless you have a reason.
 - The sheet shows the resting state first, then tokens in mid-flight and states just after they change (`--frames 12` for more). If you can view images, judge it against the quality bar. If you cannot, rely on the report and keep the scene simple.
 - Raster outputs need a browser engine (Playwright, Puppeteer or any Chrome); video also needs ffmpeg. Without them the SVG and pages are still written.
@@ -237,12 +239,13 @@ The best result is often something this file does not list. You are expected to 
 - **New motion.** Combine steps into behaviour the kit does not name: a queue that fills (`pop` hidden items as tokens arrive, `hide` them as they are taken), a machine that assembles (`grow` parts in turn), a handover (`move` an object between two places), a comparison (two zones running in parallel). Parts of your own objects can animate with `anim`: `blink`, `spin`, `march`, `ring` for details; `move`, `swing` and keyframed `keys` for parts that slide, lift, turn and wait.
 - **Experiences, not only loops.** `--experience step` lets a reader walk through the story one caption at a time; `scroll` ties the story to the page scroll; every object with `info` answers a hover or tap. Use them for teaching, onboarding and product tours. See [delivery](references/delivery.md).
 - **Mechanisms.** When how a thing works is the idea, build the thing and let its parts act it out: see [Vignettes](#vignettes).
+- **Working models.** For science and engineering (a generator, a pump, an engine, a heart), combine the two: a custom machine whose parts really turn and slide, placed in a labelled scene with links, captions and `s.callout` naming its parts. Everything that follows one cause shares one clock. Study `examples/ac-generator.scene.mjs`.
 - **Series.** For several related ideas, make several scenes with one look and one cast, so they read as chapters.
 - **Other tools.** If the idea is not spatial at all (a precise chart, a timeline of dates, a table), say so and use the right form instead of forcing it into isometric.
 
 ### Vignettes
 
-A vignette is one object, drawn large, whose parts play the idea on a loop: a press that stamps each document (approval), a turntable that shares parcels between two lanes (routing), a lighthouse sweeping its beam (monitoring). There are no labels, links or captions; the mechanism is the explanation. It suits hero slots, feature cards and anywhere a diagram would be too much.
+A vignette is one mechanism, drawn large, whose parts play the idea on a loop: a press that stamps each document (approval), a turntable that shares parcels between two lanes (routing), a lighthouse sweeping its beam (monitoring). There are no labels, links or captions; the mechanism is the explanation. One plain companion object is fine when the mechanism needs something to act on or deliver to. It suits hero slots, feature cards and anywhere a diagram would be too much.
 
 ```js
 export default ({ scene }) => {

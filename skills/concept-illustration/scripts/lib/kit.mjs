@@ -2,7 +2,7 @@
 // Sizes are in grid cells. Every builder returns { parts, w, d, h } plus optional extras.
 
 import { rectOutline, circleOutline, UNIT, SPHERE_K } from './geom.mjs';
-import { rgba, mix, adjust } from './color.mjs';
+import { rgba, mix, adjust, isHex } from './color.mjs';
 import { ICONS } from './icons.mjs';
 
 // ---------------------------------------------------------------- helpers
@@ -1008,17 +1008,27 @@ export const SHAPES = {
   prism: ({ plane = 'top', at = [0, 0, 0], outline, depth = 1, color = 'body', ...rest }) => ({ t: 'prism', plane, o: at, pts: outline, depth, color, ...rest }),
   sphere: ({ x = 0, y = 0, z = 0.5, r = 0.5, color = 'body', ...rest }) => ({ t: 'sphere', c: [x, y, z], r, color, ...rest }),
   /** Cone, or a tapered cylinder when r2 is given (r at the bottom, r2 at the top). */
-  cone: ({ x = 0, y = 0, z = 0, r = 0.5, r2 = 0, h = 1, color = 'body' }) => ({ t: 'cone', o: [x, y, z], r0: r, r1: r2, h, color }),
+  cone: ({ x = 0, y = 0, z = 0, r = 0.5, r2 = 0, h = 1, color = 'body', ...rest }) => ({ t: 'cone', o: [x, y, z], r0: r, r1: r2, h, color, ...rest }),
   /** Convex solid from flat faces; list each face's corners counter-clockwise as seen from outside. */
-  mesh: ({ faces, color = 'body', rimEdges }) => ({ t: 'mesh', faces, color, rimEdges }),
+  mesh: ({ faces, color = 'body', rimEdges, ...rest }) => ({ t: 'mesh', faces, color, rimEdges, ...rest }),
   /** Flat artwork lying on a plane at a point in space. */
-  decal: ({ plane = 'top', at = [0, 0, 0], items, size = [1, 1], turn = 0 }) => ({ t: 'decal', plane, o: at, items, size, turn }),
+  decal: ({ plane = 'top', at = [0, 0, 0], items, size = [1, 1], turn = 0, ...rest }) => ({ t: 'decal', plane, o: at, items, size, turn, ...rest }),
   /** Any SVG markup standing upright at a point in space (drawn in screen pixels around that point). */
-  raw: ({ x = 0, y = 0, z = 0, svg, w = 1, d = 0.2, h = 1 }) => ({ t: 'raw', at: [x, y, z], svg, box: { x0: x - w / 2, y0: y - d / 2, z0: z, x1: x + w / 2, y1: y + d / 2, z1: z + h } }),
+  raw: ({ x = 0, y = 0, z = 0, svg, w = 1, d = 0.2, h = 1, ...rest }) => ({ t: 'raw', at: [x, y, z], svg, box: { x0: x - w / 2, y0: y - d / 2, z0: z, x1: x + w / 2, y1: y + d / 2, z1: z + h }, ...rest }),
+  /** A soft ball of light at a point in space: a lit lamp, a spark, a hot spot. r is its reach in cells. */
+  glow: ({ x = 0, y = 0, z = 0.5, r = 0.8, color = 'gold', strength = 1, ...rest }) => ({
+    t: 'raw', at: [x, y, z], box: { x0: x - 0.04, y0: y - 0.04, z0: z - 0.04, x1: x + 0.04, y1: y + 0.04, z1: z + 0.04 }, ...rest,
+    svg: (ctx) => {
+      const hex = isHex(color) ? color : ctx.theme.roles[color] || ctx.theme.roles.gold;
+      const k = Math.max(0, Math.min(1, strength));
+      const id = ctx.def(`light|${hex}|${k}`, (gid) => `<radialGradient id="${gid}"><stop offset="0" stop-color="#ffffff" stop-opacity="${+(0.9 * k).toFixed(2)}"/><stop offset="0.16" stop-color="${hex}" stop-opacity="${+(0.85 * k).toFixed(2)}"/><stop offset="0.5" stop-color="${hex}" stop-opacity="${+(0.28 * k).toFixed(2)}"/><stop offset="1" stop-color="${hex}" stop-opacity="0"/></radialGradient>`);
+      return `<circle r="${+(r * UNIT).toFixed(1)}" fill="url(#${id})"/>`;
+    },
+  }),
   /** Several shapes that move as one: sh.group({ parts: [...], anim }). */
-  group: ({ parts, anim, sort }) => ({ t: 'group', parts, anim, sort }),
+  group: ({ parts, anim, sort, opacity }) => ({ t: 'group', parts, anim, sort, opacity }),
   /** A thin line through points in space [[x, y, z], ...]: a cable, an antenna, a beam. */
-  wire: ({ points, color, width = 1.5, dash }) => ({ t: 'line', pts: points, stroke: color, sw: width, dash }),
+  wire: ({ points, color, width = 1.5, dash, ...rest }) => ({ t: 'line', pts: points, stroke: color, sw: width, dash, ...rest }),
   outline: {
     rect: rectOutline,
     circle: circleOutline,

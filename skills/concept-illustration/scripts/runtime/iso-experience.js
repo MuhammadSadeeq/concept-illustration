@@ -24,10 +24,10 @@
   const TRACK = '{height:4px;border-radius:2px;background:linear-gradient(to right,var(--isox-ink) var(--isox-p),var(--isox-line) var(--isox-p))}';
   const THUMB = '{width:12px;height:12px;border:0;border-radius:50%;background:var(--isox-ink)}';
   const CSS = [
-    '.isox{--isox-ink:#1c2033;--isox-soft:rgba(28,32,51,.62);--isox-line:rgba(28,32,51,.16);--isox-wash:rgba(28,32,51,.08);--isox-card:#1c2033;--isox-card-ink:#fff;--isox-ring:#2f55d4;display:block;margin:0;color:var(--isox-ink);font:500 13px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-tap-highlight-color:transparent}',
+    '.isox{--isox-ink:#1c2033;--isox-soft:rgba(28,32,51,.62);--isox-line:rgba(28,32,51,.16);--isox-wash:rgba(28,32,51,.08);--isox-card:#1c2033;--isox-card-ink:#fff;--isox-ring:#2f55d4;-webkit-tap-highlight-color:transparent}',
     '.isox--dark{--isox-ink:#f1f3fa;--isox-soft:rgba(241,243,250,.66);--isox-line:rgba(241,243,250,.18);--isox-wash:rgba(241,243,250,.1);--isox-card:#f4f5fb;--isox-card-ink:#171a2a;--isox-ring:#a9bcff}',
     '.isox:focus{outline:none}',
-    '.isox-frame{position:relative;border-radius:14px;overflow:hidden;background:var(--isox-bg,transparent)}',
+    '.isox-frame{position:relative;border-radius:14px;overflow:hidden;background:var(--isox-bg,transparent);color:var(--isox-ink);font:500 13px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}',
     // drawn inside the frame so the ring always sits on the scene's own backdrop
     '.isox:focus-visible .isox-frame::after{content:"";position:absolute;inset:0;border:2px solid var(--isox-ring);border-radius:inherit;pointer-events:none}',
     '.isox-stage{position:relative}',
@@ -35,7 +35,8 @@
     '.isox-svg [data-obj]{transition:opacity .18s ease}',
     '.isox-svg.isox-dim [data-obj]:not(.isox-on){opacity:.45}',
     '.isox-hot{cursor:pointer;outline:none}',
-    '.isox-hot:focus-visible{outline:2px solid var(--isox-ring);outline-offset:3px;border-radius:6px}',
+    // placed from data-box: an outline on the group itself would swell with its shadows and effects
+    '.isox-ring{position:absolute;box-sizing:border-box;border:2px solid var(--isox-ring);border-radius:8px;pointer-events:none;visibility:hidden}',
     // a timeline reads left to right whatever the direction of the page around it
     '.isox-bar{display:flex;flex-wrap:wrap;align-items:center;padding:2px 6px 6px;direction:ltr}',
     '.isox-btn,.isox-dot{appearance:none;display:grid;place-items:center;height:40px;margin:0;padding:0;border:0;border-radius:10px;background:none;color:var(--isox-soft);cursor:pointer}',
@@ -45,11 +46,11 @@
     '.isox-play{color:var(--isox-ink)}',
     '.isox-btn:focus-visible,.isox-dot:focus-visible,.isox-scrub:focus-visible{outline:2px solid var(--isox-ring);outline-offset:-3px}',
     '.isox-scrub{appearance:none;-webkit-appearance:none;flex:1 1 150px;min-width:0;height:40px;margin:0 10px;padding:0;border-radius:10px;background:none;cursor:pointer;--isox-p:0%}',
-    '.isox-scrub::-webkit-slider-runnable-track' + TRACK,
-    '.isox-scrub::-moz-range-track' + TRACK,
+    `.isox-scrub::-webkit-slider-runnable-track${TRACK}`,
+    `.isox-scrub::-moz-range-track${TRACK}`,
     '.isox-scrub::-webkit-slider-thumb{-webkit-appearance:none;margin-top:-4px}',
-    '.isox-scrub::-webkit-slider-thumb' + THUMB,
-    '.isox-scrub::-moz-range-thumb' + THUMB,
+    `.isox-scrub::-webkit-slider-thumb${THUMB}`,
+    `.isox-scrub::-moz-range-thumb${THUMB}`,
     // auto margins centre the stepper only once it has wrapped onto a row of its own
     '.isox-steps{display:flex;align-items:center;min-width:0;margin:0 auto}',
     '.isox-dot{flex:0 1 40px;width:40px;min-width:24px}',
@@ -68,7 +69,7 @@
     '.isox--scroll{height:calc(100vh + var(--isox-span,200vh))}',
     '.isox--scroll .isox-pin{position:sticky;top:0;display:flex;align-items:center;justify-content:center;height:100vh;height:100svh}',
     '.isox--scroll .isox-frame{width:min(100%,calc((100vh - 96px)*var(--isox-ratio,1.4)))}',
-    '@media (prefers-reduced-motion:reduce){.isox *,.isox-svg [data-obj]{transition:none!important}}',
+    '@media (prefers-reduced-motion:reduce){.isox-frame *{transition:none!important}}',
   ].join('\n');
 
   const players = new WeakMap();
@@ -76,7 +77,7 @@
   let mounted = 0;
 
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-  const iconSvg = (d) => '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="' + d + '"/></svg>';
+  const iconSvg = (d) => `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="${d}"/></svg>`;
 
   function make(tag, cls, attrs) {
     const node = document.createElement(tag);
@@ -106,12 +107,15 @@
   // transparent scene, the first painted background up the tree, or else the page canvas (which
   // follows the reader's colour scheme only on pages that opted in to it).
   function hasDarkBackdrop(node) {
-    for (let el = node; el; el = el.parentElement) if (toneOf(el) != null) return toneOf(el) < 128;
-    const probe = node.appendChild(make('i'));
-    probe.style.backgroundColor = 'Canvas';
-    const dark = toneOf(probe) < 128;
-    probe.remove();
-    return dark;
+    let tone = null;
+    for (let el = node; el && tone == null; el = el.parentElement) tone = toneOf(el);
+    if (tone == null) {
+      const probe = node.appendChild(make('i'));
+      probe.style.backgroundColor = 'Canvas';
+      tone = toneOf(probe);
+      probe.remove();
+    }
+    return tone != null && tone < 128;
   }
 
   function readChapters(svg, loop) {
@@ -238,10 +242,10 @@
       if (target === svg) host.appendChild(pin); else slot.insertBefore(pin, svg);
       stage.appendChild(svg);
       svg.classList.add('isox-svg');
-      host.classList.add('isox', 'isox--' + mode);
+      host.classList.add('isox', `isox--${mode}`);
       if (svg.dataset.bg) host.style.setProperty('--isox-bg', svg.dataset.bg);
       host.style.setProperty('--isox-ratio', view.width / view.height || 1.4);
-      host.style.setProperty('--isox-span', Math.max(120, loop * SCROLL_VH_PER_SECOND) + 'vh');
+      host.style.setProperty('--isox-span', `${Math.max(120, loop * SCROLL_VH_PER_SECOND)}vh`);
       host.classList.toggle('isox--dark', hasDarkBackdrop(frame));
       if (ownsTabindex) host.setAttribute('tabindex', '0');
       // moving the svg re-parses its style sheet, so the rule can only be lifted afterwards
@@ -254,7 +258,7 @@
       svg.classList.remove('isox-svg', 'isox-dim');
       tidy(svg);
       if (target === svg) return host.remove();
-      host.classList.remove('isox', 'isox--' + mode, 'isox--dark');
+      host.classList.remove('isox', `isox--${mode}`, 'isox--dark');
       ['--isox-bg', '--isox-ratio', '--isox-span'].forEach((name) => host.style.removeProperty(name));
       if (ownsTabindex) host.removeAttribute('tabindex');
       tidy(host);
@@ -395,8 +399,8 @@
     function paint() {
       if (ui.scrub) {
         ui.scrub.value = time;
-        ui.scrub.style.setProperty('--isox-p', ((time / loop) * 100).toFixed(2) + '%');
-        ui.scrub.setAttribute('aria-valuetext', time.toFixed(1) + ' of ' + loop.toFixed(1) + ' seconds');
+        ui.scrub.style.setProperty('--isox-p', `${((time / loop) * 100).toFixed(2)}%`);
+        ui.scrub.setAttribute('aria-valuetext', `${time.toFixed(1)} of ${loop.toFixed(1)} seconds`);
       }
       if (ui.play && ui.play.title !== (playing ? 'Pause' : 'Play')) {
         ui.play.title = playing ? 'Pause' : 'Play';
@@ -468,15 +472,16 @@
       const k = Math.min(r.width / view.width, r.height / view.height);
       const ox = r.left - s.left + (r.width - view.width * k) / 2 - view.x * k;
       const oy = r.top - s.top + (r.height - view.height * k) / 2 - view.y * k;
-      return { x: ox + ((box[0] + box[2]) / 2) * k, top: oy + box[1] * k, bottom: oy + box[3] * k };
+      return { left: ox + box[0] * k, top: oy + box[1] * k, right: ox + box[2] * k, bottom: oy + box[3] * k };
     }
 
     function addHotspots() {
       const spots = Array.from(svg.querySelectorAll('[data-obj][data-box]')).filter((g) => g.dataset.label || g.dataset.info);
       if (!spots.length) return;
       const card = stage.appendChild(make('div', 'isox-card', { 'aria-hidden': 'true' }));
+      const ring = stage.appendChild(make('div', 'isox-ring'));
       const role = svg.getAttribute('role');
-      const spotOf = (node) => (node && node.closest ? node.closest('.isox-hot') : null);
+      const spotOf = (node) => (node && node.closest && stage.contains(node) ? node.closest('.isox-hot') : null);
       let open = null;
       card.innerHTML = '<b></b><span></span><i></i>';
       svg.setAttribute('role', 'group'); // an image role would hide the buttons inside it
@@ -496,15 +501,14 @@
         g.classList.add('isox-on');
         svg.classList.add('isox-dim');
         const at = spotRect(g);
+        const x = (at.left + at.right) / 2;
         const w = card.offsetWidth;
         const h = card.offsetHeight;
         const below = at.top - h - 10 < EDGE; // no room above the object
-        const left = clamp(at.x - w / 2, EDGE, Math.max(EDGE, stage.clientWidth - w - EDGE));
+        const left = clamp(x - w / 2, EDGE, Math.max(EDGE, stage.clientWidth - w - EDGE));
         const top = below ? Math.min(at.bottom + 10, stage.clientHeight - h - EDGE) : at.top - h - 10;
-        card.style.left = left + 'px';
-        card.style.top = top + 'px';
-        card.style.setProperty('--isox-caret', clamp(at.x - left, 14, w - 14) + 'px');
-        card.className = 'isox-card isox-card--open' + (below ? ' isox-card--below' : '');
+        card.style.cssText = `left:${left}px;top:${top}px;--isox-caret:${clamp(x - left, 14, w - 14)}px`;
+        card.className = `isox-card isox-card--open${below ? ' isox-card--below' : ''}`;
       }
 
       closeCard = () => {
@@ -519,6 +523,12 @@
         if (spotOf(e.target)) openCard(spotOf(e.target));
       }
 
+      // Keyboard focus gets a ring around the object, whether or not its card is open.
+      function ringAround(g) {
+        const at = g && g.matches(':focus-visible') ? spotRect(g) : null;
+        ring.style.cssText = at ? `visibility:visible;left:${at.left - 5}px;top:${at.top - 5}px;width:${at.right - at.left + 10}px;height:${at.bottom - at.top + 10}px` : '';
+      }
+
       // The listeners sit on the stage: focus listeners on an svg would make it a tab stop itself.
       listen(stage, 'pointerover', (e) => {
         const g = spotOf(e.target);
@@ -528,20 +538,30 @@
         const g = spotOf(e.target);
         if (g && e.pointerType === 'mouse' && spotOf(e.relatedTarget) !== g) closeCard();
       });
-      listen(stage, 'focusin', onPick);
       listen(stage, 'click', onPick);
-      listen(stage, 'focusout', closeCard);
+      listen(stage, 'focusin', (e) => {
+        onPick(e);
+        ringAround(spotOf(e.target));
+      });
+      listen(stage, 'focusout', () => {
+        closeCard();
+        ringAround(null);
+      });
       listen(stage, 'keydown', (e) => {
         const g = spotOf(e.target);
         if (!g || (e.key !== 'Enter' && e.key !== ' ')) return;
         e.preventDefault();
         if (open === g) closeCard(); else openCard(g);
       });
-      listen(document, 'pointerdown', (e) => { if (!stage.contains(e.target) || !spotOf(e.target)) closeCard(); });
-      listen(window, 'resize', closeCard);
+      listen(document, 'pointerdown', (e) => { if (!spotOf(e.target)) closeCard(); });
+      listen(window, 'resize', () => {
+        closeCard();
+        ringAround(spotOf(document.activeElement));
+      });
       undo.push(() => {
         closeCard();
         card.remove();
+        ring.remove();
         if (role) svg.setAttribute('role', role); else svg.removeAttribute('role');
         for (const g of spots) {
           g.classList.remove('isox-hot');

@@ -297,7 +297,7 @@ export class Scene {
   /** A short label with a leader line, attached to any point in space [x, y, z]. */
   callout(at, text, o = {}) {
     if (!Array.isArray(at) || at.length < 2) throw new Error('callout(at, text): "at" must be a point [x, y] or [x, y, z].');
-    this.callouts.push({ at: [at[0], at[1], at[2] || 0], text: String(text), sub: o.sub || null, side: o.side || 'right' });
+    this.callouts.push({ at: [at[0], at[1], at[2] || 0], text: String(text), sub: o.sub || null, side: o.side || 'right', rise: +o.rise || 0, length: o.length != null ? +o.length : 30 });
   }
 
   // ------------------------------------------------------------ ambient motion

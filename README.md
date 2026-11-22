@@ -55,6 +55,14 @@ Sometimes the clearest picture of an idea is one small machine doing one thing. 
   </tr>
 </table>
 
+### Working models
+
+Put a mechanism into a labelled scene and you get a model that teaches. Here the coil's sides really circle the shaft, the current in the wires reverses every half turn, the lamp is brightest when the coil lies level and the meter swings in step, because every part shares one clock and the phases come from the physics.
+
+<p align="center">
+  <img src="gallery/ac-generator.svg" alt="A hand-turned generator: a coil of wire spins between a north and a south magnet, slip rings carry the alternating current through a loop of wire to a glowing lamp and a meter whose needle swings both ways" width="760">
+</p>
+
 ## One scene, many looks
 
 A look is three independent choices: a **palette** (22 built in, or any brand colours), a **finish** (solid, soft, outline, hairline, flat, neon) and a **floor** (grid, dots, a raised plate, rings, none). Every combination is coherent because all tones are derived from the palette in a perceptual colour space. There is no default look: the skill directs the agent to choose for the subject, and a scene that chooses nothing gets one picked from its title.
@@ -127,7 +135,7 @@ The engine takes it from there:
 Fifty objects and ninety-five icons cover a lot, and the skill tells the agent to go past them whenever the subject needs it:
 
 - **Any object.** `s.define` builds new objects from the same shapes the kit uses (blocks, cylinders, extrusions, cones, spheres, artwork on faces). The bakery scene above defines its own oven and loaf in twenty lines.
-- **Any mechanism.** Parts of an object can run keyframed sequences of their own, which is how the three vignettes above are made. Each is about fifty lines.
+- **Any mechanism.** Parts of an object can slide, lift, swing, orbit an axis and run keyframed sequences of their own, which is how the vignettes and the generator above are made.
 - **Any drawing.** `s.svg` stands arbitrary SVG artwork in the scene.
 - **Real movement.** Objects slide, rise out of the floor, lift, appear and change state; tokens can be any object. Objects can also be translucent, or ghosted to stand for something planned or missing.
 - **Experiences.** `--experience step` produces an interactive page where a reader walks through the story one caption at a time; `scroll` ties it to the page scroll; objects answer a hover or tap with a detail card. Open [`gallery/request-lifecycle.experience.html`](gallery/request-lifecycle.experience.html) locally to try one.

@@ -430,6 +430,12 @@ export function renderPrim(ctx, p) {
     default: throw new Error(`Unknown primitive "${p.t}".`);
   }
   // a shape (or a group of shapes) can move as one: anim is given in world cells
+  if (p.opacity != null && p.opacity < 1) inner = `<g opacity="${r2(Math.max(0, p.opacity))}">${inner}</g>`;
+  if (p.anim && p.anim.type === 'orbit' && ctx.orbit) {
+    // the shape circles the place where it was drawn, keeping its own orientation
+    const b = primBox(p);
+    return ctx.orbit(p.anim, [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, (b.z0 + b.z1) / 2], inner);
+  }
   const w = p.wrap || (p.anim ? { anim: p.anim } : null);
   if (w) return `<g${attrs({ ...w, flat: false }, ctx)}>${inner}</g>`;
   return inner;

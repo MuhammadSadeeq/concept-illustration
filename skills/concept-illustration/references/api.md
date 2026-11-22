@@ -157,7 +157,7 @@ const around = s.ring(5, { at: [0, 0], r: 4.6, start: -90 });          // degree
 | `route` | `'auto'` | `'auto'` straight when aligned, otherwise one or two turns · `'x'` leave along x then turn · `'y'` leave along y then turn · `'straight'` a direct diagonal |
 | `via` | | Waypoints `[[x, y], ...]` to steer around something |
 | `arc` | | `true` or a height in cells: a hop through the air from top to top |
-| `flow` | | `true` or `{ count, speed, color }`: dots stream along the link continuously |
+| `flow` | | `true` or `{ count, speed, color }`: dots stream along the link continuously. `'alternate'` or `{ alternate: true, period, swing, phase }`: the dots rock to and fro in step instead (alternating current, a tide, a two-way exchange); `swing` is how far each way, in cells |
 | `label` | | Small caption at the middle |
 | `dim` | | Draw the line fainter, for secondary links. Its label keeps full strength |
 | `color`, `width` | from the look | Overrides |
@@ -179,7 +179,10 @@ Zone styles: `'plate'` (a raised slab), `'outline'`, `'dashed'`, `'tint'`. The l
 ```js
 s.text('STAGING', { at: [0, 2.2], size: 0.42 });        // text lying on the floor, reading along x
 s.callout([4.5, 0, 1.9], 'Hot path', { sub: '2 ms', side: 'right' });   // leader line to a point in space
+s.callout([0, 0, 2], 'Coil', { rise: 70, length: 40 });                // text lifted 70 px clear of the point
 ```
+
+Callouts name the parts of one object, where labels name whole objects. `side` is `'right'` or `'left'`; `rise` lifts the text above the point (negative lowers it) and `length` sets how far the leader runs sideways, both in pixels. Use them to move text onto empty background.
 
 ## Story
 
@@ -277,5 +280,7 @@ document.querySelector('#stage').innerHTML = svg;         // or fs.writeFileSync
 Building is deterministic: the same script always yields the same SVG.
 
 ## What the checker covers
+
+The review sheet (`--sheet`) shows each frame on the scene's own background; a scene built with `background: false` is shown on white or near-black to match its look. Add `--frames 12` when something quick, such as a burst of tokens, falls between the frames.
 
 The report is produced from the scene's geometry: objects that intersect, links that run under objects or kink, labels that collide, hidden objects never revealed, crowding, missing focal point, missing motion, extreme proportions and over-long loops. It does not judge whether the picture makes its point, and it does not inspect every frame of the animation. Use the sheet or the preview for that.

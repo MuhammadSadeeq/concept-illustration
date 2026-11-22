@@ -2,7 +2,7 @@
 
 import {
   UNIT, SPHERE_K, proj, projP, r1, r2, depthSort, aabbScreen, aabbUnion, aabbShift, aabbIntersects,
-  bbox2, unionBox, growBox, boxesOverlap, rectOutline, circleOutline, polyPath, textWidth, esc, planeMatrix,
+  bbox2, unionBox, growBox, boxesOverlap, rectOutline, circleOutline, polyPath, textWidth, esc, planeMatrix, PLANES,
 } from './geom.mjs';
 import { material } from './themes.mjs';
 import { KIT, PACKETS } from './kit.mjs';
@@ -209,13 +209,34 @@ export function compile(sc) {
           return loopStyle(`0%,100%{opacity:1}50%{opacity:${a.min ?? 0.25}}`, { period: P, delay: -(a.phase || 0) * P, ease: 'ease-in-out' });
         }
         case 'spin': return loopStyle(`to{transform:rotate(${a.dir === -1 ? -360 : 360}deg)}`, { period: snapPeriod(a.period || 8, T) });
-        case 'march': return loopStyle(`to{stroke-dashoffset:${-a.len}}`, { period: snapPeriod(a.period || 1.2, T) });
+        case 'march': {
+          // alternate: the dashes rock back and forth like alternating current, still at each turn
+          if (a.alternate) { const P = snapPeriod(a.period || 2, T); return `animation:${kf(`from{stroke-dashoffset:${r2(a.len / 2)}}to{stroke-dashoffset:${r2(-a.len / 2)}}`)} ${r2(P / 2)}s ${EASE.sine} ${r2(-(a.phase || 0) * P)}s infinite alternate both`; }
+          return loopStyle(`to{stroke-dashoffset:${-a.len}}`, { period: snapPeriod(a.period || 1.2, T) });
+        }
         case 'ring': {
           const P = snapPeriod(a.period || 2.4, T);
           return loopStyle(`0%{transform:scale(.3);opacity:0}15%{opacity:.9}100%{transform:scale(1.25);opacity:0}`, { period: P, delay: -(a.phase || 0) * P, ease: 'ease-out' });
         }
         default: return '';
       }
+    },
+    /**
+     * Carry a shape round a circle about an axis without turning the shape itself:
+     * translate by M·R(θ)·(r, 0), built from two opposite spins so the path is an exact ellipse.
+     */
+    orbit(a, centre, inner) {
+      const plane = a.plane || { x: 'right', y: 'left', z: 'top' }[a.axis || 'x'] || 'right';
+      const Pl = PLANES[plane];
+      const [ax, ay] = proj(Pl.U[0], Pl.U[1], Pl.U[2]);
+      const [bx, by] = proj(Pl.V[0], Pl.V[1], Pl.V[2]);
+      const det = ax * by - bx * ay;
+      const f6 = (v) => +v.toFixed(6);
+      const inv = [by / det, -ay / det, -bx / det, ax / det].map(f6).join(' ');
+      const [cx, cy] = projP(centre);
+      const P = snapPeriod(a.period || 4, T), dir = a.dir === -1 ? -1 : 1, a0 = r2(a.from || 0);
+      const turn = (sign) => loopStyle(`to{transform:rotate(${sign * dir * 360}deg)}`, { period: P });
+      return `<g transform="translate(${r2(cx)} ${r2(cy)}) matrix(${f6(ax)} ${f6(ay)} ${f6(bx)} ${f6(by)} 0 0) rotate(${a0})"><g style="${turn(1)}"><g transform="translate(${r2(a.r ?? 0.5)} 0)"><g style="${turn(-1)}"><g transform="rotate(${-a0}) matrix(${inv} 0 0) translate(${r2(-cx)} ${r2(-cy)})">${inner}</g></g></g></g></g>`;
     },
   };
 
@@ -446,7 +467,22 @@ export function compile(sc) {
     svg += arrow ? `<g opacity="${r2(alpha)}">${arrow}</g>` : '';
     // travelling dots for a continuous flow
     let dots = '';
-    if (flow) {
+    if (flow === 'alternate' || (flow && flow.alternate)) {
+      // alternating flow: every dot rocks back and forth about its own place, all in step
+      const fo = typeof flow === 'object' ? flow : {};
+      const P = snapPeriod(fo.period ?? 2, T);
+      const count = fo.count ?? Math.max(2, Math.round(path.total / 0.8));
+      const amp = (fo.swing ?? 0.3) / path.total, ph = (fo.phase || 0) * 2 * Math.PI;
+      const dotColor = fo.color ? K.hex(fo.color) : th.glow > 0 ? mix(color, '#ffffff', 0.35) : K.hex('accent');
+      for (let i = 0; i < count; i++) {
+        const f0 = (i + 0.5) / count, N = 16;
+        const at = (t) => projP(pointAt(path, clamp(f0 - amp * Math.cos(2 * Math.PI * t + ph), 0, 1)));
+        const css = keyframes('translate', Array.from({ length: N + 1 }, (_, j) => [(j / N) * P, at(j / N)]), P);
+        const pos = at(0);
+        const glowDot = th.glow > 0 ? `<circle r="7" fill="url(#${glowGrad(dotColor, 0.7)})"/>` : '';
+        dots += `<g transform="translate(${r1(pos[0])} ${r1(pos[1])})" style="${loopStyle(css, { period: P })}">${glowDot}<circle r="2.6" fill="${dotColor}"${th.outline ? ` stroke="${th.ink}" stroke-width="1"` : ''}/></g>`;
+      }
+    } else if (flow) {
       const fo = typeof flow === 'object' ? flow : {};
       const count = fo.count ?? Math.max(1, Math.round(path.total / 2.6));
       const P = snapPeriod(path.total / (fo.speed ?? 2.4), T);
@@ -504,7 +540,7 @@ export function compile(sc) {
   for (const ob of sc.objs) {
     let inner = renderParts(ob.parts);
     for (const tint of ob.tints) {
-      const res = KIT[ob.kind].build({ ...ob.opts, color: tint.color, accent: ob.opts.accent === tint.color ? 'paper' : ob.opts.accent }, K);
+      const res = (sc.kinds[ob.kind] || KIT[ob.kind]).build({ ...ob.opts, color: tint.color, accent: ob.opts.accent === tint.color ? 'paper' : ob.opts.accent }, K);
       inner += `<g opacity="0" style="${trackStyle(tint.track)}">${renderParts(ob.k === 1 ? res.parts : sc.scaleParts(res.parts, ob.k))}</g>`;
     }
     if (ob.level < 1 || ob.tracks.grow) {
@@ -659,13 +695,19 @@ export function compile(sc) {
   const calloutSvg = (ax, ay, c) => {
     const left = c.side === 'left';
     const dir = left ? -1 : 1;
-    const tx = ax + 30 * dir;
+    // rise lifts the text away from the point (negative lowers it); length is how far the leader runs sideways
+    const rise = c.rise || 0, len = Math.max(14, c.length ?? 30);
+    const ty = ay - rise;
+    const tx = ax + len * dir;
     const w = Math.max(textWidth(c.text, 13, 650), c.sub ? textWidth(c.sub, 11, 500) : 0);
-    let svg = `<path d="M${r1(ax + 5 * dir)} ${r1(ay)}H${r1(tx - 6 * dir)}" stroke="${th.text.muted}" stroke-width="1.2" stroke-linecap="round" fill="none"/><circle cx="${r1(ax + 5 * dir)}" cy="${r1(ay)}" r="2.4" fill="${th.text.muted}"/>`;
-    svg += `<text x="${r1(tx)}" y="${r1(ay + (c.sub ? -2 : 4.5))}" font-size="13" font-family="${esc(th.font)}" font-weight="650" text-anchor="${left ? 'end' : 'start'}" fill="${th.text.color}"${halo}>${esc(c.text)}</text>`;
-    if (c.sub) svg += `<text x="${r1(tx)}" y="${r1(ay + 12)}" font-size="11" font-family="${esc(th.font)}" font-weight="500" text-anchor="${left ? 'end' : 'start'}" fill="${th.text.muted}"${halo}>${esc(c.sub)}</text>`;
-    const box = left ? { x0: tx - w - 4, x1: ax, y0: ay - 14, y1: ay + 18 } : { x0: ax, x1: tx + w + 4, y0: ay - 14, y1: ay + 18 };
+    const lead = rise ? `M${r1(ax)} ${r1(ay - Math.sign(rise) * 5)}L${r1(ax + Math.min(len - 8, Math.abs(rise) * 0.5) * dir)} ${r1(ty)}H${r1(tx - 6 * dir)}` : `M${r1(ax + 5 * dir)} ${r1(ay)}H${r1(tx - 6 * dir)}`;
+    const dot = rise ? [ax, ay - Math.sign(rise) * 5] : [ax + 5 * dir, ay];
+    let svg = `<path d="${lead}" stroke="${th.text.muted}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="${r1(dot[0])}" cy="${r1(dot[1])}" r="2.4" fill="${th.text.muted}"/>`;
+    svg += `<text x="${r1(tx)}" y="${r1(ty + (c.sub ? -2 : 4.5))}" font-size="13" font-family="${esc(th.font)}" font-weight="650" text-anchor="${left ? 'end' : 'start'}" fill="${th.text.color}"${halo}>${esc(c.text)}</text>`;
+    if (c.sub) svg += `<text x="${r1(tx)}" y="${r1(ty + 12)}" font-size="11" font-family="${esc(th.font)}" font-weight="500" text-anchor="${left ? 'end' : 'start'}" fill="${th.text.muted}"${halo}>${esc(c.sub)}</text>`;
+    const box = left ? { x0: tx - w - 4, x1: tx + 2, y0: ty - 14, y1: ty + 18 } : { x0: tx - 2, x1: tx + w + 4, y0: ty - 14, y1: ty + 18 };
     grow(box);
+    grow({ x0: ax - 4, x1: ax + 4, y0: ay - 4, y1: ay + 4 });
     labelBoxes.push(box);
     return svg;
   };
@@ -890,7 +932,7 @@ export function compile(sc) {
   const title = o.title || o.heading || 'Isometric illustration';
   const desc = o.desc || (sc.objs.filter((ob) => ob.label).length ? `Shows: ${sc.objs.filter((ob) => ob.label).map((ob) => ob.label).join(', ')}.` : '');
   const svg = [
-    `<svg xmlns="http://www.w3.org/2000/svg" id="${uid}" viewBox="${vb.x0} ${vb.y0} ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="${uid}-t${desc ? ` ${uid}-s` : ''}" data-loop="${r2(T)}" data-intro="${introEnd}"${o.background ? ` data-bg="${th.bg.to}"` : ''}${captions.length ? ` data-chapters="${esc(JSON.stringify(captions.map((c) => ({ t: +c.t.toFixed(2), text: c.text }))))}"` : ''}${keyTimes.length ? ` data-keys="${[...new Set([...keyTimes, T - 0.95].map((t) => Math.max(0, Math.min(T - 0.05, t)).toFixed(2)))].join(' ')}"` : ''} font-family="${esc(th.font)}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" id="${uid}" viewBox="${vb.x0} ${vb.y0} ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="${uid}-t${desc ? ` ${uid}-s` : ''}" data-loop="${r2(T)}" data-intro="${introEnd}"${o.background ? ` data-bg="${th.bg.to}"` : ''}${th.dark ? ' data-dark="1"' : ''}${captions.length ? ` data-chapters="${esc(JSON.stringify(captions.map((c) => ({ t: +c.t.toFixed(2), text: c.text }))))}"` : ''}${keyTimes.length ? ` data-keys="${[...new Set([...keyTimes, T - 0.95].map((t) => Math.max(0, Math.min(T - 0.05, t)).toFixed(2)))].join(' ')}"` : ''} font-family="${esc(th.font)}">`,
     `<title id="${uid}-t">${esc(title)}</title>`, desc ? `<desc id="${uid}-s">${esc(desc)}</desc>` : '',
     `<style>${css}</style>`,
     `<defs>${[...defs.values()].map((d) => d.svg).join('')}</defs>`,

@@ -41,6 +41,7 @@ Coordinates inside a builder are in grid cells **relative to the object's own or
 | Faceted solid | `sh.mesh({ faces, color })` | Convex only. Each face is a list of `[x, y, z]` corners, counter-clockwise seen from outside |
 | Thin line | `sh.wire({ points, color, width, dash })` | A cable, mast or beam through `[x, y, z]` points |
 | Group | `sh.group({ parts, anim, sort })` | Shapes that move as one (`anim`), or that must be drawn in a fixed order (`sort: false`) |
+| Light | `sh.glow({ x, y, z, r, color, strength })` | A soft ball of light at a point: a lit lamp, a spark, a hot spot. `r` is its reach in cells. Give it `anim: { type: 'blink' }` to make it pulse |
 | Flat artwork | `sh.decal({ plane, at, items })` | Artwork lying on a plane anywhere in space |
 | Raw SVG | `sh.raw({ x, y, z, svg, w, h })` | Markup drawn in screen pixels around a point; not foreshortened |
 
@@ -48,7 +49,7 @@ Outline helpers for `prism` and `panel`: `sh.outline.rect(w, d, radius)`, `sh.ou
 
 `color` is a palette role (`body` `body2` `muted` `dark` `paper` `screen` `accent` `accent2` `ok` `warn` `danger` `gold`) or a hex. Prefer roles: the object then follows whatever look the scene uses. Use a hex only for something whose colour is its identity (bread, a brand device).
 
-Every shape also takes `anim` (see [moving parts](#moving-parts)). Shapes are drawn back to front automatically. Keep them from intersecting: stack with `z`, or set them side by side.
+Every shape also takes `anim` (see [moving parts](#moving-parts)) and `opacity` (0 to 1: glass, a faint guide, a field line). Shapes are drawn back to front automatically. Keep them from intersecting: stack with `z`, or set them side by side.
 
 ## Artwork on faces
 
@@ -90,7 +91,7 @@ Details, on artwork items:
 | --- | --- | --- |
 | `{ type: 'blink', period: 2.4, min: 0.25, phase: 0.3 }` | Fades between full and `min` | Status lights, a glowing window, a cursor (`min: 0`). Also works on a shape |
 | `{ type: 'spin', period: 8, dir: 1 }` on a `g` item | Turns about the group's own origin | Fans, dials, radar, wheels drawn flat, a sweeping beam |
-| `{ type: 'march', period: 1.2, len: 0.6 }` on a dashed `line` | The dashes travel. `len` is one dash plus one gap | Belts, cables carrying current, loading bars |
+| `{ type: 'march', period: 1.2, len: 0.6 }` on a dashed `line` | The dashes travel. `len` is one dash plus one gap. On a `sh.wire` the dash and `len` are in pixels. Add `alternate: true` and the dashes rock to and fro, at rest at each turn | Belts, cables carrying current, loading bars, field lines; alternating current |
 | `{ type: 'ring', period: 2.4 }` on a `circle` | Grows and fades | Signals, ripples, a ping |
 
 Mechanisms, on shapes, groups and artwork:
@@ -98,10 +99,11 @@ Mechanisms, on shapes, groups and artwork:
 | `anim` | Effect |
 | --- | --- |
 | `{ type: 'move', by: [x, y, z], period: 3, hold: 0.15, ease: 'inOut', phase: 0 }` | There and back again, resting at each end. A piston, a lift, a drawer, a bobbing float |
-| `{ type: 'swing', from: -20, to: 20, period: 3 }` on a `g` item | Rocks between two angles about the group's origin. A needle, a pendulum, a lever drawn on a face |
+| `{ type: 'swing', from: -20, to: 20, period: 3 }` on a `g` item | Rocks between two angles about the group's origin. A needle, a pendulum, a lever drawn on a face. `hold: 0, ease: 'sine'` gives a smooth pendulum |
+| `{ type: 'orbit', axis: 'x', r: 0.6, from: 90, period: 3 }` on a shape or group | The shape circles the place where it is drawn, at radius `r`, about a line parallel to `axis` (`'x'`, `'y'` or `'z'`), starting at angle `from`. It keeps its own orientation, so it is exact for anything that looks the same all the way round its axis: a rod or wire parallel to the axis, a ball, a crank pin, a planet, a seat on a wheel |
 | `{ type: 'keys', period: 5, phase: 0, keys: [...] }` | A scripted sequence, for anything with waits, different speeds or several stops |
 
-Each key is `{ at, move, rotate, scale, opacity, ease }`. `at` runs from 0 to 1 across the period. `move` is `[x, y, z]` in cells from where the part was drawn (on a face artwork item: `[x, y]` in the face's own units). `rotate` (degrees) and `scale` apply to artwork items. `ease` shapes the journey to the *next* key: `inOut` (default), `in` (gathers speed, for something falling or leaving), `out` (settles, for something arriving), `back` (overshoots and returns), `linear` (a belt).
+Each key is `{ at, move, rotate, scale, opacity, ease }`. `at` runs from 0 to 1 across the period. `move` is `[x, y, z]` in cells from where the part was drawn (on a face artwork item: `[x, y]` in the face's own units). `move` and `opacity` work on shapes, groups and artwork items; `rotate` (degrees) and `scale` work on artwork items only. `ease` shapes the journey to the *next* key: `inOut` (default), `in` (gathers speed, for something falling or leaving), `out` (settles, for something arriving), `back` (overshoots and returns), `linear` (a belt).
 
 ```js
 // a lift that waits, rises with its load, holds, and returns empty
@@ -125,11 +127,13 @@ Rules that keep a mechanism convincing:
 - **Draw a moving part where it starts.** Shapes are put in depth order once, from where they are drawn, and a part keeps that order as it moves. So draw a part behind anything it will pass behind, and express the rest of its journey with `move`. A part that would have to pass both behind and in front of the same shape needs a different route.
 - **Parts that slide inside one another** (a ram in a sleeve, a drawer in a cabinet) cannot be ordered automatically. Put the shapes concerned in `sh.group({ sort: false, parts: [...] })` and list them back to front; they are then drawn exactly in that order.
 - **Keep parts on top of a base in one group** (`sh.group({ parts: [beltA, beltB] })`) when moving parts ride over several base shapes, so the riders are always drawn above all of them.
+- **Things that really turn.** A solid cannot be rotated, but a turning machine is made of two things that can be drawn exactly: artwork that spins in the plane facing along the axis (spokes, blades, the end of a frame: a `g` item with `spin` on a `sh.decal` whose plane faces along the axis: `'right'` for the x axis, `'left'` for y, `'top'` for z), and rods parallel to the axis that `orbit` it. Give both the same `period`, and start them together with `rot` on the artwork and `from` on the orbit. `examples/ac-generator.scene.mjs` builds a rotating coil and a crank this way.
+- **One cause, many effects.** When several things follow one quantity (a current, a pressure, a load), run them all at the same `period` and set their phases from the physics: what is zero together starts together.
 - **Fading out.** An artwork item with `fill` and `fade: [x1, y1, x2, y2]` is at full strength at the first point and gone at the second: light beams, glows, shadows, speed streaks.
 - **Room to move.** The frame is cropped to the shapes at rest. If a part travels or sweeps beyond them, widen the scene's `pad`.
 - A moving part has no shadow of its own, and the object's shadow follows only its still shapes.
 
-Three finished mechanisms to study: `examples/approval-press.scene.mjs` (keyed parts, a ram in a sleeve), `examples/parcel-sorter.scene.mjs` (parts sharing one clock with `phase`, artwork that turns) and `examples/lighthouse.scene.mjs` (a fading beam that sweeps).
+Finished mechanisms to study: `examples/approval-press.scene.mjs` (keyed parts, a ram in a sleeve), `examples/parcel-sorter.scene.mjs` (parts sharing one clock with `phase`, artwork that turns), `examples/lighthouse.scene.mjs` (a fading beam that sweeps) and `examples/ac-generator.scene.mjs` (a labelled working model: a coil that turns, alternating current in the wires, a lamp and a meter in step with it).
 
 For `spin`, put the rotating artwork in a group whose `tx`, `ty` is the centre of rotation and draw the items around `0, 0`:
 
@@ -199,6 +203,6 @@ Every built-in object is written the same way. Read `scripts/lib/kit.mjs` for fi
 - **Silhouette first.** Block the object out of two or three shapes and build it. If it is not recognisable yet, detail will not save it; change the masses.
 - **Real proportions, slightly chunky.** A footprint of about 1 to 2 cells and a height of 0.8 to 1.8 sits well beside the kit's objects.
 - **One telling detail.** The oven's glowing window, the turbine's blades. Put it on a side face, where it reads.
-- **Roles, not hexes**, so the object belongs to every look.
+- **Roles, not hexes**, so the object belongs to every look. In the `line` finish neutral roles are drawn almost white; a part that must read as solid there needs `dark`, `accent` or a hex.
 - **Small things on big things.** Details between 0.05 and 0.3 cells read as detail; thinner than 0.03 disappears.
 - **Check it alone**: build a scene with only the object in two looks (`--looks sand,neon`) before using it.

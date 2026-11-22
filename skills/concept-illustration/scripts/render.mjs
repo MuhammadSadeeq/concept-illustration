@@ -33,6 +33,9 @@ window.__seek = (t, withIntro) => {
   }
 };`;
 
+// A transparent scene is reviewed on a page of the tone it was designed for, never on the sheet's own dark frame.
+const tileBg = (svg) => (String(svg).match(/data-bg="(#[0-9a-fA-F]{6})"/) || [])[1] || (/data-dark="1"/.test(String(svg)) ? '#14161b' : '#ffffff');
+
 function pageHtml(svg, { bg = 'transparent', width, sheet } = {}) {
   const m = meta(svg);
   if (!sheet) {
@@ -42,7 +45,7 @@ function pageHtml(svg, { bg = 'transparent', width, sheet } = {}) {
   const cells = sheet.times.map((t, i) => {
     // each copy needs its own ids so gradients and keyframes do not collide
     const copy = svg.replace(/iso[0-9a-z]+(?=[-"#.)\s])/g, (id) => `${id}f${i}`).replace('<svg ', `<svg data-t="${t.toFixed(3)}" `);
-    return `<figure><div>${copy}</div><figcaption>${t.toFixed(1)}s</figcaption></figure>`;
+    return `<figure><div style="background:${tileBg(svg)}">${copy}</div><figcaption>${t.toFixed(1)}s</figcaption></figure>`;
   }).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#16181d;font:600 13px system-ui,sans-serif;color:#cfd3dc}main{display:grid;grid-template-columns:repeat(${cols},${cell}px);gap:8px;padding:8px}figure{margin:0;background:#22252c;border-radius:6px;overflow:hidden}figure svg{display:block;width:100%;height:auto}figcaption{padding:4px 8px}</style></head><body><main>${cells}</main><script>${SEEK}</script></body></html>`;
 }
@@ -175,7 +178,7 @@ export async function renderGrid(items, out, { cols, cell } = {}) {
   const cells = items.map(({ label, svg }) => {
     const keys = ((svg.match(/data-keys="([^"]+)"/) || [, ''])[1]).split(' ').filter(Boolean).map(Number).sort((a, b) => a - b);
     const t = keys.length ? keys[Math.floor(keys.length / 2)] + 0.3 : meta(svg).loop * 0.4; // just after a key moment, so the caption has settled
-    return `<figure><div>${svg.replace('<svg ', `<svg data-t="${t.toFixed(2)}" `)}</div><figcaption>${label}</figcaption></figure>`;
+    return `<figure><div style="background:${tileBg(svg)}">${svg.replace('<svg ', `<svg data-t="${t.toFixed(2)}" `)}</div><figcaption>${label}</figcaption></figure>`;
   }).join('');
   const html = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#16181d;font:600 13px system-ui,sans-serif;color:#cfd3dc}main{display:grid;grid-template-columns:repeat(${cols},${cell}px);gap:8px;padding:8px}figure{margin:0;background:#22252c;border-radius:6px;overflow:hidden}figure svg{display:block;width:100%;height:auto}figcaption{padding:5px 9px}</style></head><body><main>${cells}</main><script>${SEEK}</script></body></html>`;
   const W = cols * cell + (cols + 1) * 8, H = Math.round(rows * ((cell * m.h) / m.w + 30) + (rows + 1) * 8);
