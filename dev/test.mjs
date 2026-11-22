@@ -3,6 +3,8 @@
 // every theme, and common mistakes produce helpful errors.   node dev/test.mjs
 
 import fs from 'node:fs';
+import os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as iso from '../skills/concept-illustration/scripts/isokit.mjs';
@@ -132,6 +134,23 @@ throws('a builder must return parts', () => { const s = iso.scene({}); s.define(
     const html = experienceHtml('demo', r, { mode });
     ok(`experience page (${mode})`, html.startsWith('<!doctype html>') && html.includes(`data-mode="${mode}"`) && html.includes('IsoExperience') && html.includes('<svg') && !/src="http|href="http/.test(html));
   }
+}
+
+// every example must be well-formed XML: used as <img>, an SVG is parsed strictly
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-xml-'));
+  const files = [];
+  for (const file of fs.readdirSync(examples).filter((f) => f.endsWith('.scene.mjs'))) {
+    const mod = await import(pathToFileURL(path.join(examples, file)).href);
+    const out = path.join(tmp, file.replace('.scene.mjs', '.svg'));
+    fs.writeFileSync(out, (await mod.default(api)).build().svg);
+    files.push(out);
+  }
+  const check = 'import sys, xml.dom.minidom\nbad = 0\nfor f in sys.argv[1:]:\n    try:\n        xml.dom.minidom.parse(f)\n    except Exception as e:\n        bad += 1; print(f, e)\nsys.exit(1 if bad else 0)\n';
+  const r = spawnSync('python3', ['-I', '-c', check, ...files], { encoding: 'utf8' });
+  if (r.error) console.log('(python3 not found: XML well-formedness not checked)');
+  else ok('examples are well-formed XML', r.status === 0, (r.stdout || r.stderr).slice(0, 400));
+  fs.rmSync(tmp, { recursive: true, force: true });
 }
 
 console.log(`${passed} passed, ${failed} failed`);

@@ -36,8 +36,9 @@
     '.isox-svg.isox-dim [data-obj]:not(.isox-on){opacity:.45}',
     '.isox-hot{cursor:pointer;outline:none}',
     '.isox-hot:focus-visible{outline:2px solid var(--isox-ring);outline-offset:3px;border-radius:6px}',
-    '.isox-bar{display:flex;flex-wrap:wrap;align-items:center;padding:2px 6px 6px}',
-    '.isox-btn,.isox-dot{appearance:none;display:grid;place-items:center;height:40px;padding:0;border:0;border-radius:10px;background:none;color:var(--isox-soft);cursor:pointer}',
+    // a timeline reads left to right whatever the direction of the page around it
+    '.isox-bar{display:flex;flex-wrap:wrap;align-items:center;padding:2px 6px 6px;direction:ltr}',
+    '.isox-btn,.isox-dot{appearance:none;display:grid;place-items:center;height:40px;margin:0;padding:0;border:0;border-radius:10px;background:none;color:var(--isox-soft);cursor:pointer}',
     '.isox-btn{flex:none;width:40px;transition:background .15s,color .15s}',
     '.isox-btn:hover{background:var(--isox-wash);color:var(--isox-ink)}',
     '.isox-btn svg{display:block;fill:currentColor}',
