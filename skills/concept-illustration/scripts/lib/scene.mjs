@@ -2,8 +2,8 @@
 // links between them, optional zones and text, and a story that plays in a loop.
 
 import { aabbUnion, aabbShift, UNIT } from './geom.mjs';
-import { resolveTheme, material, THEME_NAMES, ROLE_NAMES } from './themes.mjs';
-import { KIT, KIND_NAMES, PACKET_NAMES } from './kit.mjs';
+import { resolveTheme, material, pickLook, THEME_NAMES, ROLE_NAMES } from './themes.mjs';
+import { KIT, KIND_NAMES, PACKET_NAMES, SHAPES } from './kit.mjs';
 import { ICON_NAMES } from './icons.mjs';
 import { primBox } from './prims.mjs';
 import { routePoints, buildPath, buildArc } from './links.mjs';
@@ -30,9 +30,9 @@ function unknown(what, value, list) {
   return new Error(`Unknown ${what} "${value}".${s ? ` Did you mean "${s}"?` : ''} Available: ${list.join(', ')}.`);
 }
 
-const COMMON_OPTS = ['at', 'on', 'z', 'scale', 'color', 'accent', 'label', 'sub', 'labelSide', 'hero', 'hidden', 'float', 'glow', 'id', 'shadow', 'badge', 'level'];
+const COMMON_OPTS = ['at', 'on', 'z', 'scale', 'color', 'accent', 'label', 'sub', 'labelSide', 'hero', 'hidden', 'float', 'glow', 'id', 'shadow', 'badge', 'level', 'info'];
 const STEP_OPTS = ['dur', 'delay', 'color', 'keep', 'as', 'count', 'stagger', 'speed', 'label', 'route', 'via', 'arc', 'ease', 'react', 'stay', 'id', 'scale'];
-const SCENE_OPTS = ['theme', 'accent', 'accent2', 'bg', 'background', 'grid', 'title', 'desc', 'heading', 'subheading', 'loop', 'intro', 'pad', 'aspect', 'id', 'font', 'shadows'];
+const SCENE_OPTS = ['look', 'theme', 'palette', 'finish', 'floor', 'accent', 'accent2', 'bg', 'background', 'grid', 'title', 'desc', 'heading', 'subheading', 'loop', 'intro', 'pad', 'aspect', 'id', 'font', 'shadows', 'haze', 'vignette', 'detail'];
 const LINK_OPTS = ['style', 'color', 'arrow', 'flow', 'route', 'via', 'label', 'arc', 'width', 'z', 'gap', 'dim'];
 
 function scaleParts(parts, k) {
@@ -59,17 +59,26 @@ function scaleParts(parts, k) {
 export class Scene {
   constructor(opts = {}) {
     for (const k of Object.keys(opts)) if (!SCENE_OPTS.includes(k)) this._early = [...(this._early || []), { level: 'warn', code: 'option', msg: `scene(): unknown option "${k}" was ignored.${suggest(k, SCENE_OPTS) ? ` Did you mean "${suggest(k, SCENE_OPTS)}"?` : ''}` }];
-    this.opts = { theme: 'aurora', background: true, intro: true, pad: 56, shadows: true, ...opts };
-    this.theme = resolveTheme(this.opts.theme, this.opts);
+    this.opts = { background: true, intro: true, pad: 56, shadows: true, ...opts };
+    this.notes = this._early || [];
+    let look = this.opts.look || this.opts.theme || null;
+    if (!look && !this.opts.palette) {
+      // No look chosen: pick one from the subject so different scenes do not all look alike.
+      const seed = String(this.opts.title || this.opts.heading || '');
+      look = seed ? pickLook(seed) : 'aurora';
+      this.notes.push({ level: 'hint', code: 'no-look', msg: `No look was chosen, so "${look}" was picked from the title. Choose one on purpose: look: '<palette>' with optional finish and floor (run build.mjs --list), or palette: { bg, accent } for brand colours.` });
+    }
+    this.look = look;
+    this.theme = resolveTheme({ ...this.opts, look });
     this.id = this.opts.id || null; // filled in at build time from the scene's content
     this.objs = [];
     this.links = [];
     this.zones = [];
     this.texts = [];
     this.callouts = [];
+    this.kinds = {};
     this.steps = null;
     this.storyOpts = {};
-    this.notes = this._early || [];
     this.n = 0;
     const theme = this.theme;
     this.K = {
@@ -102,11 +111,11 @@ export class Scene {
 
   /** Place an object from the kit. Returns a handle used by link(), story steps and on:. */
   add(kind, o = {}) {
-    if (!KIT[kind]) throw unknown('object kind', kind, KIND_NAMES);
+    const spec = this.kinds[kind] || KIT[kind];
+    if (!spec) throw unknown('object kind', kind, [...Object.keys(this.kinds), ...KIND_NAMES]);
     o = this._tidy(o, `add('${kind}')`);
-    const spec = KIT[kind];
     const allowed = [...COMMON_OPTS, ...spec.opts.split(' ').filter(Boolean)];
-    for (const k of Object.keys(o)) if (!allowed.includes(k)) this.note('warn', 'option', `add('${kind}'): unknown option "${k}" was ignored. Options for ${kind}: ${allowed.join(', ')}.`);
+    if (!spec.custom) for (const k of Object.keys(o)) if (!allowed.includes(k)) this.note('warn', 'option', `add('${kind}'): unknown option "${k}" was ignored. Options for ${kind}: ${allowed.join(', ')}.`);
     if (o.icon && !ICON_NAMES.includes(o.icon)) throw unknown('icon', o.icon, ICON_NAMES);
     for (const c of ['color', 'accent']) if (o[c] && !ROLE_NAMES.includes(o[c]) && !isHex(o[c])) throw unknown('colour', o[c], ROLE_NAMES);
     const opts = { color: 'body', accent: 'accent', ...o };
@@ -115,6 +124,15 @@ export class Scene {
       if (!o.accent && opts.color === 'accent') opts.accent = 'accent2';
     }
     const res = spec.build(opts, this.K);
+    if (!res || !Array.isArray(res.parts) || !res.parts.length) throw new Error(`add('${kind}'): the builder must return { parts: [ ... ] } with at least one shape.`);
+    if (res.w == null || res.d == null || res.h == null) {
+      // measure a custom object from its shapes
+      let bb = null;
+      for (const p of res.parts) bb = aabbUnion(bb, primBox(p));
+      res.w = res.w ?? Math.max(0.2, 2 * Math.max(Math.abs(bb.x0), Math.abs(bb.x1)));
+      res.d = res.d ?? Math.max(0.2, 2 * Math.max(Math.abs(bb.y0), Math.abs(bb.y1)));
+      res.h = res.h ?? Math.max(0.05, bb.z1);
+    }
     const k = o.scale ?? 1;
     const parts = k === 1 ? res.parts : scaleParts(res.parts, k);
     let x = 0, y = 0, z = 0;
@@ -144,6 +162,33 @@ export class Scene {
     obj.top = [x, y, z + obj.h];
     this.objs.push(obj);
     return obj;
+  }
+
+  /**
+   * Teach the scene a new kind of object, built from shapes.
+   *   s.define('oven', (o, sh, K) => ({ parts: [sh.box({ w: 1.4, d: 1.2, h: 1.1, color: o.color }), ...] }));
+   *   s.add('oven', { at: [4, 0], label: 'Oven' });
+   * sh is the shapes toolbox; K gives colours: K.hex('accent'), K.mat('body').on.
+   */
+  define(name, builder) {
+    if (typeof name !== 'string' || typeof builder !== 'function') throw new Error("define(name, builder): pass a name and a function (o, sh, K) => ({ parts: [...] }).");
+    this.kinds[name] = { custom: true, opts: '', desc: 'custom', build: (o, K) => builder(o, SHAPES, K) };
+    return this;
+  }
+
+  /** A one-off object built from shapes: s.custom({ at, label, parts: (sh, K) => [ ... ] }). */
+  custom(o = {}) {
+    const { parts, w, d, h, round, ...rest } = o;
+    if (!parts) throw new Error('custom({ parts }): pass parts: (sh, K) => [ ...shapes ] or an array of shapes.');
+    const name = `custom${Object.keys(this.kinds).length + 1}`;
+    this.kinds[name] = { custom: true, opts: '', desc: 'custom', build: (oo, K) => ({ parts: typeof parts === 'function' ? parts(SHAPES, K, oo) : parts, w, d, h, round }) };
+    return this.add(name, rest);
+  }
+
+  /** Stand any SVG markup upright at a point: a logo, a hand-drawn figure, anything. w and h are its size in cells. */
+  svg(markup, o = {}) {
+    const { w = 1, h = 1, ...rest } = o;
+    return this.custom({ ...rest, w, d: 0.3, h, parts: (sh) => [sh.raw({ svg: `<g transform="translate(${-w * 20} ${-h * 40}) scale(${(w * 40) / 100})">${markup}</g>`, w, h })] });
   }
 
   // ------------------------------------------------------------ layout helpers
@@ -259,7 +304,7 @@ export class Scene {
   /** Move a small token from one object to another (it follows a link between them when one exists). */
   send(a, b, o = {}) {
     if (typeof o === 'string') o = { as: o };
-    if (o.as && !PACKET_NAMES.includes(o.as) && !KIT[o.as]) throw unknown('token', o.as, [...PACKET_NAMES, ...KIND_NAMES]);
+    if (o.as && !PACKET_NAMES.includes(o.as) && !KIT[o.as] && !this.kinds[o.as]) throw unknown('token', o.as, [...PACKET_NAMES, ...Object.keys(this.kinds), ...KIND_NAMES]);
     return { type: 'send', from: this._foot(a, 'send(a, b)'), to: this._foot(b, 'send(a, b)'), ...o };
   }
   /** A ripple and a small bounce: "this just did something". */
@@ -275,6 +320,11 @@ export class Scene {
   drop(obj, o = {}) { return { type: 'drop', obj: this._obj(obj, 'drop(obj)'), ...o }; }
   /** Make an object rise out of the floor to a fraction of its height (create it with level: 0). A lower value sinks it. */
   grow(obj, to = 1, o = {}) { return { type: 'grow', obj: this._obj(obj, 'grow(obj)'), to: Math.max(0, Math.min(1, typeof to === 'number' ? to : 1)), ...(typeof to === 'object' ? to : o) }; }
+  /** Slide an object across the floor to [x, y] and leave it there until the loop restarts. */
+  move(obj, to, o = {}) {
+    if (!Array.isArray(to) || to.length < 2) throw new Error('move(obj, [x, y]): pass the destination as [x, y].');
+    return { type: 'move', obj: this._obj(obj, 'move(obj, [x, y])'), to, ...o };
+  }
   /** Recolour an object (for a change of state). It returns to normal when the loop restarts. */
   tint(obj, color = 'ok', o = {}) {
     if (!ROLE_NAMES.includes(color) && !isHex(color)) throw unknown('colour', color, ROLE_NAMES);
@@ -297,8 +347,8 @@ export class Scene {
   build() { return compile(this); }
 }
 
-const METHODS = ['add', 'link', 'zone', 'text', 'callout', 'row', 'grid', 'ring', 'float', 'story', 'send', 'pulse', 'glow', 'pop', 'show', 'hide', 'lift', 'drop', 'grow', 'tint', 'shake', 'mark', 'say', 'wait', 'build', 'toSVG'];
-const METHOD_ALIAS = { connect: 'link', arrow: 'link', edge: 'link', line: 'link', object: 'add', place: 'add', put: 'add', node: 'add', group: 'zone', region: 'zone', area: 'zone', annotate: 'callout', caption: 'say', narrate: 'say', move: 'send', emit: 'send', flow: 'send', highlight: 'glow', reveal: 'pop', appear: 'pop', rise: 'grow', raise: 'grow', pause: 'wait', delay: 'wait', sleep: 'wait', timeline: 'story', sequence: 'story', hover: 'float', render: 'build', compile: 'build' };
+const METHODS = ['add', 'link', 'zone', 'text', 'callout', 'row', 'grid', 'ring', 'define', 'custom', 'svg', 'float', 'story', 'send', 'move', 'pulse', 'glow', 'pop', 'show', 'hide', 'lift', 'drop', 'grow', 'tint', 'shake', 'mark', 'say', 'wait', 'build', 'toSVG'];
+const METHOD_ALIAS = { connect: 'link', arrow: 'link', edge: 'link', line: 'link', object: 'add', place: 'add', put: 'add', node: 'add', group: 'zone', region: 'zone', area: 'zone', annotate: 'callout', caption: 'say', narrate: 'say', emit: 'send', flow: 'send', highlight: 'glow', reveal: 'pop', appear: 'pop', rise: 'grow', raise: 'grow', pause: 'wait', delay: 'wait', sleep: 'wait', timeline: 'story', sequence: 'story', hover: 'float', render: 'build', compile: 'build' };
 
 /** Create a scene. Calling a method that does not exist explains what to use instead. */
 export const scene = (opts) => new Proxy(new Scene(opts), {
@@ -311,4 +361,4 @@ export const scene = (opts) => new Proxy(new Scene(opts), {
     return () => { const sg = suggest(prop, METHODS); throw new Error(`s.${prop}() does not exist.${sg ? ` Did you mean s.${sg}()?` : ''} Motion comes from s.story([...steps]) and s.float(obj); labels come from the label: option of s.add(). Scene methods: ${METHODS.join(', ')}.`); };
   },
 });
-export { THEME_NAMES, KIND_NAMES, PACKET_NAMES, ICON_NAMES, UNIT };
+export { THEME_NAMES, KIND_NAMES, PACKET_NAMES, ICON_NAMES, UNIT, SHAPES };

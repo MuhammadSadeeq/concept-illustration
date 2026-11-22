@@ -159,6 +159,36 @@ export async function renderSheet(svg, out, { frames = 8, cols, cell } = {}) {
   return out;
 }
 
+/** Several builds of one scene side by side (for comparing looks). items: [{ label, svg }] */
+export async function renderGrid(items, out, { cols, cell } = {}) {
+  cols = cols || (items.length <= 4 ? 2 : 3);
+  cell = cell || (cols === 2 ? 620 : 460);
+  const m = meta(items[0].svg);
+  const rows = Math.ceil(items.length / cols);
+  const cells = items.map(({ label, svg }) => {
+    const keys = ((svg.match(/data-keys="([^"]+)"/) || [, ''])[1]).split(' ').filter(Boolean).map(Number).sort((a, b) => a - b);
+    const t = keys.length ? keys[Math.floor(keys.length / 2)] + 0.3 : meta(svg).loop * 0.4; // just after a key moment, so the caption has settled
+    return `<figure><div>${svg.replace('<svg ', `<svg data-t="${t.toFixed(2)}" `)}</div><figcaption>${label}</figcaption></figure>`;
+  }).join('');
+  const html = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#16181d;font:600 13px system-ui,sans-serif;color:#cfd3dc}main{display:grid;grid-template-columns:repeat(${cols},${cell}px);gap:8px;padding:8px}figure{margin:0;background:#22252c;border-radius:6px;overflow:hidden}figure svg{display:block;width:100%;height:auto}figcaption{padding:5px 9px}</style></head><body><main>${cells}</main><script>${SEEK}</script></body></html>`;
+  const W = cols * cell + (cols + 1) * 8, H = Math.round(rows * ((cell * m.h) / m.w + 30) + (rows + 1) * 8);
+  const done = await withPage({ width: W, height: H }, 1, async (page) => {
+    await page.setContent(html);
+    await page.evaluate(() => window.__seek(0, false));
+    await page.screenshot({ path: out, fullPage: true });
+    return true;
+  });
+  if (done) return out;
+  const exe = findChrome();
+  if (!exe) throw new Error('No browser engine found. Install one with "npm i -D playwright && npx playwright install chromium", or set CHROME_PATH to a Chrome/Chromium/Edge binary.');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-'));
+  const file = path.join(tmp, 'looks.html');
+  fs.writeFileSync(file, html.replace('</body>', `<script>addEventListener('load',()=>window.__seek(0,false))</script></body>`));
+  const r = spawnSync(exe, ['--headless=new', '--no-sandbox', '--hide-scrollbars', `--window-size=${W},${H}`, `--screenshot=${path.resolve(out)}`, pathToFileURL(file).href], { encoding: 'utf8' });
+  if (r.status !== 0 || !fs.existsSync(out)) throw new Error(`Chrome could not take the screenshot: ${(r.stderr || '').slice(0, 300)}`);
+  return out;
+}
+
 /** Frame-accurate video of the loop. format: mp4 | webm | gif */
 export async function renderVideo(svg, out, { format = 'mp4', fps = 30, width = 1280, loops = 1, intro = false, bg } = {}) {
   const ff = spawnSync('ffmpeg', ['-version'], { encoding: 'utf8' });

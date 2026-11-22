@@ -1,6 +1,6 @@
 # Kit reference
 
-Fifty object kinds, the icons and screen contents they can carry, and the tokens that travel between them. `node SKILL_DIR/scripts/build.mjs --list` prints the same lists from the engine itself.
+Fifty object kinds, the icons and screen contents they can carry, and the tokens that travel between them. `node SKILL_DIR/scripts/build.mjs --list` prints the same lists from the engine itself. When none of these is the right object, build your own: see [custom.md](custom.md).
 
 Contents: [choosing an object](#choosing-an-object) · [all kinds](#all-kinds) · [options shared by several kinds](#options-shared-by-several-kinds) · [icons](#icons) · [screen content](#screen-content) · [tokens](#tokens) · [combining objects](#combining-objects)
 
@@ -23,7 +23,7 @@ Pick the most literal object the viewer already knows. When the idea is abstract
 | A place | `building` `house` `factory` `cloud` `globe` `pin` |
 | An outcome or goal | `flag` `gem` `bulb` |
 | A signal | `antenna` `sign` |
-| Anything else | `tile` with an icon, or `sign` with an icon or two letters |
+| Anything else | Your own object ([custom.md](custom.md)); failing that, a `tile` or `sign` with an icon |
 
 Prefer one kind per meaning. If two objects are both servers, make both `server`; the viewer reads the repetition as "same sort of thing".
 
@@ -87,7 +87,7 @@ Sizes are footprint width × depth × height in cells, at `scale: 1`.
 | --- | --- | --- | --- |
 | `user` | r 0.38, h 1.2 | `head` (colour) | Abstract figure. Body takes `color` |
 | `robot` | 0.95 × 0.85 × 1.62 | `facing` | Eyes blink |
-| `orb` | 1.2 × 1.2 × 1.5 | `r` | Sphere over a pedestal; glows on dark themes |
+| `orb` | 1.2 × 1.2 × 1.5 | `r` | Sphere over a pedestal; glows on dark palettes |
 
 ### Places and scenery
 
@@ -166,14 +166,14 @@ What travels in `s.send(a, b, { as })`:
 
 | Token | Reads as |
 | --- | --- |
-| `dot` (default) | A signal, a request, a unit of data. Glows on dark themes |
+| `dot` (default) | A signal, a request, a unit of data. Glows on dark palettes |
 | `doc` | A document, a page, a response with content |
 | `cube` | A block of data, an encrypted or opaque payload |
 | `box` | A package, a build artefact, goods |
 | `coin` | Money, a credit, a token of value |
 | `mail` | A message, a notification, an order |
 | `gem` | A result, something valuable or finished |
-| any kit kind | `as: 'truck'`, `as: 'user'`, `as: 'package'` with `scale` (default 0.5) |
+| any kind, including your own | `as: 'truck'`, `as: 'user'`, `as: 'oven'` with `scale` (default 0.5) |
 
 `color` tints a token: `s.send(a, b, { as: 'cube', color: 'danger' })`.
 

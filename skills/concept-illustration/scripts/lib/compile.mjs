@@ -73,6 +73,7 @@ export function compile(sc) {
 
   if (sc.steps) {
     const durOf = (st) => {
+      if (st.type === 'move') { const cur = st.obj; return clamp(Math.hypot(st.to[0] - cur.x, st.to[1] - cur.y) / (st.speed ?? speed), 0.5, 2.6); }
       if (st.type !== 'send') return undefined;
       st._path = pathFor(st);
       const n = st.count ?? 1;
@@ -129,6 +130,11 @@ export function compile(sc) {
           mk.sc.fromTo(st.t0, st.t0 + 0.3, 0.4, 1.15, 'out').to(st.t0 + 0.3, st.t0 + 0.5, 1, 'inOut');
           if (st.keep === false) mk.op.to(st.t1, st.t1 + 0.3, 0, 'smooth');
           ob.marks.push(mk);
+          break;
+        }
+        case 'move': {
+          const [ax, ay] = proj(ob.x, ob.y, ob.z), [bx, by] = proj(st.to[0], st.to[1], ob.z + (st.to[2] || 0));
+          track(ob, 'move', 'translate', [0, 0]).to(st.t0, st.t1, [bx - ax, by - ay], st.ease || 'inOut');
           break;
         }
         case 'grow': {
@@ -198,6 +204,38 @@ export function compile(sc) {
 
   let floor = '', floorFx = '', world = [], air = '', overlay = '';
 
+  const rich = o.detail !== 'clean';
+  // extent of everything standing on the floor
+  let ext = null;
+  for (const ob of sc.objs) if (!ob.parent) ext = unionBox(ext, { x0: ob.x - ob.w / 2, y0: ob.y - ob.d / 2, x1: ob.x + ob.w / 2, y1: ob.y + ob.d / 2 });
+  for (const lk of sc.links) if (!lk.path.arc) for (const f of lk.path.flat) ext = unionBox(ext, { x0: f.p[0], y0: f.p[1], x1: f.p[0], y1: f.p[1] });
+  for (const zn of sc.zones) ext = unionBox(ext, { x0: zn.x0, y0: zn.y0, x1: zn.x1, y1: zn.y1 });
+
+  // --- a base plate turns the scene into a diorama standing on one raised slab
+  if (th.floor.plate && ext && o.floor !== false) {
+    const m = 1.15, T = 0.34;
+    const w = ext.x1 - ext.x0 + m * 2, d = ext.y1 - ext.y0 + m * 2, cx = (ext.x0 + ext.x1) / 2, cy = (ext.y0 + ext.y1) / 2;
+    const pts = rectOutline(w, d, Math.min(1, w / 5, d / 5), cx, cy);
+    if (o.shadows) floor += `<path d="${polyPath(pts.map(([x, y]) => proj(x + 0.55, y - 0.15, -T)))}" fill="${th.shadow.color}" fill-opacity="${r2(th.shadow.alpha * 0.75)}" filter="url(#${blurFilter(16)})"/>`;
+    floor += renderPrism(ctx, { plane: 'top', o: [0, 0, -T], pts, depth: T, color: 'floor', ao: false });
+    // faint tile lines on the slab, kept clear of its rounded edge
+    let d2 = '';
+    for (let x = Math.ceil(ext.x0 - m + 0.8); x <= ext.x1 + m - 0.8; x++) { const a = proj(x, ext.y0 - m + 0.5), b = proj(x, ext.y1 + m - 0.5); d2 += `M${r1(a[0])} ${r1(a[1])}L${r1(b[0])} ${r1(b[1])}`; }
+    for (let y = Math.ceil(ext.y0 - m + 0.8); y <= ext.y1 + m - 0.8; y++) { const a = proj(ext.x0 - m + 0.5, y), b = proj(ext.x1 + m - 0.5, y); d2 += `M${r1(a[0])} ${r1(a[1])}L${r1(b[0])} ${r1(b[1])}`; }
+    floor += `<path d="${d2}" fill="none" stroke="${th.floor.color}" stroke-opacity="${r2(th.floor.alpha * 0.55)}" stroke-width="1"/>`;
+    grow(growBox(bbox2(pts.map(([x, y]) => proj(x, y, -T))), 14));
+    grow(bbox2(pts.map(([x, y]) => proj(x, y, 0))));
+  }
+  // --- concentric rings spreading from the middle of the scene
+  if (th.floor.rings && ext && o.floor !== false) {
+    const [rx0, ry0] = proj((ext.x0 + ext.x1) / 2, (ext.y0 + ext.y1) / 2, 0);
+    const reachR = Math.hypot(ext.x1 - ext.x0, ext.y1 - ext.y0) / 2 + 2.5;
+    for (let r = 1.5, i = 0; r <= reachR; r += 1.5, i++) {
+      const fade = 1 - r / (reachR + 1.5);
+      floor += `<ellipse cx="${r1(rx0)}" cy="${r1(ry0)}" rx="${r1(r * UNIT * SPHERE_K)}" ry="${r1(r * UNIT * 0.7071)}" fill="none" stroke="${th.floor.color}" stroke-opacity="${r2(th.floor.alpha * 1.5 * fade)}" stroke-width="${i % 2 ? 1 : 1.4}"${i % 2 ? ' stroke-dasharray="3 7"' : ''}/>`;
+    }
+  }
+
   // --- zones
   for (const zn of sc.zones) {
     const w = zn.x1 - zn.x0, d = zn.y1 - zn.y0, cx = (zn.x0 + zn.x1) / 2, cy = (zn.y0 + zn.y1) / 2;
@@ -256,19 +294,28 @@ export function compile(sc) {
       const dx = 0.5 * hh, dy = -0.26 * hh;
       const pts = hull([...outline, ...outline.map(([a, b]) => [a + dx, b + dy])]);
       body = `<path d="${polyPath(pts.map(([a, b]) => proj(a, b, 0)))}" fill="${th.shadow.color}" fill-opacity="${th.shadow.alpha}"/>`;
+      body += `<path d="${polyPath(outline.map(([a, b]) => proj(a * 1.04, b * 1.04, 0)))}" fill="${th.shadow.color}" fill-opacity="${r2(th.shadow.alpha * 0.7)}" filter="url(#${blurFilter(2)})"/>`;
+    } else if (ob.parent || soft) {
+      const g = ob.parent ? 1.03 : 0.92;
+      const blur = ob.parent ? 2 : th.shadow.kind === 'cast' ? 6 : th.shadow.blur * 1.35;
+      const alpha = ob.parent ? th.shadow.alpha : (th.shadow.kind === 'cast' ? 0.3 : th.shadow.alpha) * 0.6;
+      body = `<path d="${polyPath(outline.map(([a, b]) => proj(a * g, b * g, 0)))}" fill="${th.shadow.color}" fill-opacity="${r2(alpha)}" filter="url(#${blurFilter(blur)})"/>`;
     } else {
-      const g = ob.parent ? 1.03 : soft ? 0.92 : 1.1;
-      const off = ob.parent || soft ? [0, 0] : [0.1 + Math.min(ob.h, 2) * 0.05, -0.05];
-      const blur = ob.parent ? 2 : th.shadow.kind === 'cast' ? 6 : th.shadow.blur * (soft ? 1.35 : 1);
-      const alpha = (th.shadow.kind === 'cast' ? 0.3 : th.shadow.alpha) * (soft ? 0.6 : 1);
-      const pts = outline.map(([a, b]) => proj(a * g + off[0], b * g + off[1], 0));
-      body = `<path d="${polyPath(pts)}" fill="${th.shadow.color}" fill-opacity="${r2(alpha)}" filter="url(#${blurFilter(blur)})"/>`;
+      // Two layers read as real light: a tight dark contact shadow where the object meets the
+      // floor, and a wider, softer one thrown away from the light that grows with height.
+      const hh = Math.min(ob.h, 2.8), reach = th.shadow.reach ?? 1;
+      const off = [(0.12 + hh * 0.2) * reach, -(0.04 + hh * 0.07) * reach];
+      const cast = outline.map(([a, b]) => proj(a * 1.12 + off[0], b * 1.12 + off[1], 0));
+      const contact = outline.map(([a, b]) => proj(a * 1.04 + 0.03, b * 1.04, 0));
+      body = `<path d="${polyPath(cast)}" fill="${th.shadow.color}" fill-opacity="${r2(th.shadow.alpha * 0.55)}" filter="url(#${blurFilter(r1(th.shadow.blur * (1 + hh * 0.18)))})"/>`
+        + `<path d="${polyPath(contact)}" fill="${th.shadow.color}" fill-opacity="${r2(Math.min(0.75, th.shadow.alpha * 0.95))}" filter="url(#${blurFilter(2.2)})"/>`;
     }
     const [sx, sy] = proj(ob.x, ob.y, baseZ);
     const fl = floatStyleOf.get(ob);
     let inner = wrap(body, fl ? fl.shadow : '');
     inner = wrap(inner, opacityStyle(ob), hiddenAttr(ob));
-    grow(growBox(bbox2([[sx - sw * UNIT, sy - sd * UNIT * 0.5], [sx + sw * UNIT, sy + sd * UNIT * 0.5]]), 6));
+    if (ob.tracks.move) inner = wrap(inner, trackStyle(ob.tracks.move));
+    grow(growBox(bbox2([[sx - sw * UNIT, sy - sd * UNIT * 0.5], [sx + (sw + Math.min(ob.h, 2.8) * 0.3) * UNIT, sy + sd * UNIT * 0.5]]), 6));
     return `<g transform="translate(${r1(sx)} ${r1(sy)})">${inner}</g>`;
   };
 
@@ -286,6 +333,21 @@ export function compile(sc) {
       const el = `<ellipse cx="${r1(gx)}" cy="${r1(gy)}" rx="${r1(R * UNIT * SPHERE_K)}" ry="${r1(R * UNIT * 0.7071)}" fill="url(#${glowGrad(color, strength)})"/>`;
       const tr = ob.tracks.glow;
       glowLayer += wrap(wrap(el, tr ? trackStyle(tr) : '', tr && tr.initial === 0 ? ' opacity="0"' : ''), opacityStyle(ob), hiddenAttr(ob));
+    }
+  }
+
+  // --- a few motes of light drifting up around the hero (only where the look has glow)
+  let motes = '';
+  if (rich && th.glow >= 0.45) {
+    for (const ob of sc.objs.filter((b) => b.hero && !b.hidden).slice(0, 1)) {
+      const color = mix(K.hex(ob.opts.color !== 'body' ? ob.opts.color : ob.opts.accent), '#ffffff', 0.45);
+      const P = snapPeriod(4.2, T);
+      for (let i = 0; i < 7; i++) {
+        const a = i * 2.399, rr = (0.45 + ((i * 37) % 10) / 10 * 0.75) * Math.max(ob.w, ob.d);
+        const [px, py] = proj(ob.x + Math.cos(a) * rr, ob.y + Math.sin(a) * rr, ob.z + 0.2 + ((i * 53) % 10) / 10 * ob.h * 0.6);
+        const rise = 26 + ((i * 29) % 10) * 2.2;
+        motes += `<circle cx="${r1(px)}" cy="${r1(py)}" r="${i % 3 === 0 ? 1.9 : 1.3}" fill="${color}" opacity="0" style="${loopStyle(`0%{transform:translateY(0);opacity:0}18%{opacity:.85}100%{transform:translateY(${-rise}px);opacity:0}`, { period: P, delay: -(i / 7) * P, ease: 'ease-out' })}"/>`;
+      }
     }
   }
 
@@ -334,7 +396,9 @@ export function compile(sc) {
       svg += `<path d="${d}" fill="none" stroke="${mix(color, th.shadow.color, 0.55)}" stroke-width="${width * 5.2}" stroke-linecap="round" stroke-linejoin="round" opacity="${alpha}"/><path d="${d}" fill="none" stroke="${color}" stroke-width="${width * 3.4}" stroke-linecap="round" stroke-linejoin="round" opacity="${alpha}"/><path d="${d}" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="${width * 0.9}" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 ${-width * 0.9})"/>`;
     } else {
       if (th.glow > 0 && !lo.dim) svg += `<path d="${d}" fill="none" stroke="${color}" stroke-opacity="${r2(th.glow * 0.22)}" stroke-width="${width * 4.5}" stroke-linecap="round" stroke-linejoin="round"/>`;
-      svg += `<path d="${d}" fill="none" stroke="${color}" stroke-opacity="${r2(alpha)}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"${dashArr ? ` stroke-dasharray="${dashArr}"` : ''}${style ? ` style="${style}"` : ''}/>`;
+      // solid links draw themselves from source to target as the scene arrives
+      const draw = !dashArr && o.intro ? ` pathLength="1" stroke-dasharray="1" style="animation:${kf('from{stroke-dashoffset:1}to{stroke-dashoffset:0}')} .7s ${EASE.inOut} ${r2(0.25 + li * 0.08)}s both"` : '';
+      svg += `<path d="${d}" fill="none" stroke="${color}" stroke-opacity="${r2(alpha)}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"${dashArr ? ` stroke-dasharray="${dashArr}"` : ''}${style ? ` style="${style}"` : ''}${draw}/>`;
     }
     svg += arrow ? `<g opacity="${r2(alpha)}">${arrow}</g>` : '';
     // travelling dots for a continuous flow
@@ -353,6 +417,10 @@ export function compile(sc) {
         const glowDot = th.glow > 0 ? `<circle r="9" fill="url(#${glowGrad(dotColor, 0.8)})"/>` : '';
         dots += `<g transform="translate(${r1(pos[0])} ${r1(pos[1])})" style="${join(loopStyle(css, { period: P, delay }), loopStyle(fade, { period: P, delay }))}">${glowDot}<circle r="${lo.style === 'pipe' ? 4 : 3.2}" fill="${dotColor}"${th.outline ? ` stroke="${th.ink}" stroke-width="1.2"` : ''}/></g>`;
       }
+    }
+    if (rich && !path.arc && lk.a.obj && lo.style !== 'road' && lo.style !== 'pipe' && lo.arrow !== 'both') {
+      const [qx, qy] = projP(flat[0].p);
+      svg += `<ellipse cx="${r1(qx)}" cy="${r1(qy)}" rx="4.6" ry="2.7" fill="${th.text.halo}" stroke="${color}" stroke-opacity="${r2(alpha)}" stroke-width="${Math.max(1.4, width * 0.8)}"/>`;
     }
     if (path.arc) air += svg + dots; else { linkLayer += svg; floorFx += dots; }
     grow(growBox(bbox2(flat.map((f) => projP(f.p))), 10));
@@ -415,15 +483,19 @@ export function compile(sc) {
     if (fl) inner = wrap(inner, fl.obj);
     if (ob.tracks.shake) inner = wrap(inner, trackStyle(ob.tracks.shake));
     if (ob.tracks.lift) inner = wrap(inner, trackStyle(ob.tracks.lift));
+    if (ob.tracks.move) inner = wrap(inner, trackStyle(ob.tracks.move));
     inner = wrap(inner, introStyle(ob));
     const [sx, sy] = proj(ob.x, ob.y, ob.z);
-    const svg = `${stackedShadow.get(ob) || ''}<g transform="translate(${r1(sx)} ${r1(sy)})">${inner}</g>`;
+    const sbx = aabbScreen(ob.box);
+    const meta = ` data-obj="${esc(ob.id)}"${ob.label ? ` data-label="${esc(ob.label)}"` : ''}${ob.opts.info ? ` data-info="${esc(ob.opts.info)}"` : ''} data-box="${r1(sbx.x0)} ${r1(sbx.y0)} ${r1(sbx.x1)} ${r1(sbx.y1)}"`;
+    const svg = `${stackedShadow.get(ob) || ''}<g transform="translate(${r1(sx)} ${r1(sy)})"${meta}>${inner}</g>`;
     let box = ob.box;
     if (ob.float) box = { ...box, z1: box.z1 + 0.2 };
     world.push({ aabb: box, svg, ob });
     const sb = aabbScreen(box);
     const liftPx = ob.tracks.lift ? Math.max(0, ...ob.tracks.lift.segs.map((s) => -s.to[1])) : 0;
     grow({ x0: sb.x0, x1: sb.x1, y0: sb.y0 - liftPx - (ob.float ? 8 : 0), y1: sb.y1 });
+    if (ob.tracks.move) for (const sg of ob.tracks.move.segs) grow({ x0: sb.x0 + sg.to[0], x1: sb.x1 + sg.to[0], y0: sb.y0 + sg.to[1], y1: sb.y1 + sg.to[1] });
   }
 
   // --- story tokens: one copy per straight run of the route, so each sorts correctly among the objects
@@ -434,12 +506,13 @@ export function compile(sc) {
     mv.until = next ? next.t0 : T - 0.45;
   });
   const kitToken = (mv) => {
-    const res = KIT[mv.as].build({ color: mv.color === 'accent' ? 'body' : mv.color, accent: 'accent' }, K);
+    const res = (sc.kinds[mv.as] || KIT[mv.as]).build({ color: mv.color === 'accent' ? 'body' : mv.color, accent: 'accent' }, K);
     const k = mv.scale ?? 0.5;
     return { parts: sc.scaleParts(res.parts, k), shadow: Math.max(res.w, res.d) * k * 0.45 };
   };
   movers.forEach((mv, mi) => {
-    let pk = PACKETS[mv.as] ? PACKETS[mv.as](mv.color, K) : KIT[mv.as] ? kitToken(mv) : PACKETS.dot(mv.color, K);
+    const isKind = !PACKETS[mv.as] && (sc.kinds[mv.as] || KIT[mv.as]);
+    let pk = PACKETS[mv.as] ? PACKETS[mv.as](mv.color, K) : isKind ? kitToken(mv) : PACKETS.dot(mv.color, K);
     if (PACKETS[mv.as] && mv.scale && mv.scale !== 1) pk = { ...pk, parts: sc.scaleParts(pk.parts, mv.scale), shadow: pk.shadow * mv.scale, glowZ: pk.glowZ != null ? pk.glowZ * mv.scale : undefined };
     const partsSvg = renderParts(pk.parts);
     let local = null;
@@ -474,7 +547,10 @@ export function compile(sc) {
     const staticF = 0.3 + 0.2 * (mi % 3);
     const staticPos = projP(pointAt(path, staticF));
     const glowSvg = pk.glow && th.glow > 0 ? `<circle cy="${-(pk.glowZ ?? 0.16) * UNIT}" r="${r1(24 * (PACKETS[mv.as] && mv.scale ? mv.scale : 1))}" fill="url(#${glowGrad(K.hex(mv.color), 0.9)})"/>` : '';
-    const body = glowSvg + partsSvg;
+    // a token swells as it is emitted and shrinks as it is absorbed, so hand-offs feel physical
+    const endScale = mv.until != null ? 1 : 0.5;
+    const swell = keyframes('scale', [[0, 0.35], [mv.t0, 0.35, 'out'], [mv.t0 + Math.min(0.24, dur * 0.3), 1], [mv.t1 - Math.min(0.16, dur * 0.25), 1, 'in'], [mv.t1, endScale], [T, endScale]], T);
+    const body = glowSvg + `<g style="${storyStyle(swell)}">${partsSvg}</g>`;
 
     // fraction range of each straight run
     const segs = [];
@@ -496,6 +572,17 @@ export function compile(sc) {
       const svg = `<g transform="translate(${r1(staticPos[0])} ${r1(staticPos[1])})" opacity="${on ? 1 : 0}" style="${join(storyStyle(moveCss), storyStyle(vis))}">${body}</g>`;
       if (path.arc) air += svg; else world.push({ aabb: sg.box, svg, bias: 0.05 });
     });
+    if (rich && !isKind && path.d && !mv.stay) {
+      let Lp = 0;
+      for (let i = 1; i < path.flat.length; i++) { const a = projP(path.flat[i - 1].p), b = projP(path.flat[i].p); Lp += Math.hypot(b[0] - a[0], b[1] - a[1]); }
+      const tail = Math.min(62, Lp * 0.4);
+      const dash = [[0, path.rev ? -Lp : tail]];
+      for (let i = 0; i <= N; i++) { const u = i / N, f = mv.ease === 'linear' ? u : E(u); dash.push([mv.t0 + u * dur, path.rev ? -(Lp - f * Lp) : tail - f * Lp]); }
+      dash.push([T, dash[dash.length - 1][1]]);
+      const vis = keyframes('opacity', [[0, 0], [Math.max(0, mv.t0), 0], [mv.t0 + Math.min(0.18, dur * 0.3), 0.6], [mv.t1 - Math.min(0.2, dur * 0.3), 0.6], [mv.t1, 0], [T, 0]], T);
+      const trail = `<path d="${path.d}" fill="none" stroke="${K.hex(mv.color)}" stroke-width="${th.outline ? 2.2 : 3}" stroke-linecap="round" stroke-dasharray="${r1(tail)} ${r1(Lp * 3)}" opacity="0" style="${join(storyStyle(keyframes('dash', dash, T)), storyStyle(vis))}"/>`;
+      if (path.arc) air += trail; else floorFx += trail;
+    }
     if (pk.shadow && o.shadows && th.shadow.kind !== 'none') {
       const sp = proj(...pointAt(path, staticF).slice(0, 2), path.arc ? 0 : path.z || 0);
       const vis = windowCss(mv.t0, mv.until != null ? Math.max(mv.t1, mv.until) : mv.t1, true, true);
@@ -581,8 +668,9 @@ export function compile(sc) {
       svg += `<circle cx="${r1(bx)}" cy="${r1(by)}" r="9.5" fill="${A}"/><text x="${r1(bx)}" y="${r1(by + 4)}" font-size="11.5" font-family="${esc(th.font)}" font-weight="800" text-anchor="middle" fill="${material(th, 'accent').on}">${esc(ob.opts.badge)}</text>`;
       pos.box.x0 -= 26;
     }
-    overlay += wrap(svg, opacityStyle(ob), hiddenAttr(ob));
+    overlay += wrap(wrap(svg, opacityStyle(ob), hiddenAttr(ob)), ob.tracks.move ? trackStyle(ob.tracks.move) : '');
     grow(pos.box);
+    if (ob.tracks.move) for (const sg of ob.tracks.move.segs) grow({ x0: pos.box.x0 + sg.to[0], x1: pos.box.x1 + sg.to[0], y0: pos.box.y0 + sg.to[1], y1: pos.box.y1 + sg.to[1] });
   }
 
   // --- zone labels lie on the floor along one edge of the zone. Try each edge and keep the one
@@ -621,7 +709,14 @@ export function compile(sc) {
       const m = material(th, role);
       const ic = ICONS[mk.icon].replace(/\{c\}/g, m.on);
       overlay += `<g transform="translate(${r1(cx)} ${r1(cy)})"><g opacity="0" style="${trackStyle(mk.op)}"><g style="${trackStyle(mk.sc)}"><circle r="13" fill="${m.base}" stroke="${th.outline ? th.ink : th.text.halo}" stroke-width="${th.outline || 2}"/><g transform="translate(-8 -8) scale(0.667)" fill="none" stroke="${m.on}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">${ic}</g></g></g></g>`;
-      grow({ x0: cx - 16, x1: cx + 16, y0: cy - 16, y1: cy + 16 });
+      if (rich) {
+        const t0 = mk.op.segs[0].t0;
+        const rays = Array.from({ length: 8 }, (_, k) => `<path d="M0 -19V-26" transform="rotate(${k * 45})"/>`).join('');
+        const sc2 = keyframes('scale', [[0, 0.5], [t0, 0.5, 'out'], [t0 + 0.5, 1.35], [T, 1.35]], T);
+        const op2 = keyframes('opacity', [[0, 0], [Math.max(0, t0 - 0.001), 0], [t0 + 0.08, 1, 'smooth'], [t0 + 0.5, 0], [T, 0]], T);
+        overlay += `<g transform="translate(${r1(cx)} ${r1(cy)})"><g fill="none" stroke="${m.base}" stroke-width="2" stroke-linecap="round" opacity="0" style="${join(storyStyle(sc2), storyStyle(op2))}">${rays}</g></g>`;
+      }
+      grow({ x0: cx - 16, x1: cx + 16, y0: cy - 28, y1: cy + 16 });
     });
   }
 
@@ -724,6 +819,7 @@ export function compile(sc) {
 
   // ================================================================ 8. assemble
 
+  const hazeSvg = o.background && o.haze !== false && th.haze > 0 && H > 320 ? `<rect x="${vb.x0}" y="${vb.y0}" width="${W}" height="${Math.round(H * 0.5)}" fill="url(#${def('haze', (id) => `<linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${th.bg.to}" stop-opacity="${typeof o.haze === 'number' ? o.haze : th.haze}"/><stop offset="1" stop-color="${th.bg.to}" stop-opacity="0"/></linearGradient>`)})" pointer-events="none"/>` : '';
   const sortedWorld = depthSort(world).map((w) => w.svg).join('');
   const fadeIn = (delay, dur = 0.5) => (o.intro ? `animation:${kf('from{opacity:0}to{opacity:1}')} ${dur}s ease-out ${r2(delay)}s both` : '');
   const css = [
@@ -734,13 +830,15 @@ export function compile(sc) {
   const title = o.title || o.heading || 'Isometric illustration';
   const desc = o.desc || (sc.objs.filter((ob) => ob.label).length ? `Shows: ${sc.objs.filter((ob) => ob.label).map((ob) => ob.label).join(', ')}.` : '');
   const svg = [
-    `<svg xmlns="http://www.w3.org/2000/svg" id="${uid}" viewBox="${vb.x0} ${vb.y0} ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="${uid}-t${desc ? ` ${uid}-s` : ''}" data-loop="${r2(T)}" data-intro="${introEnd}"${o.background ? ` data-bg="${th.bg.to}"` : ''}${keyTimes.length ? ` data-keys="${[...new Set([...keyTimes, T - 0.95].map((t) => Math.max(0, Math.min(T - 0.05, t)).toFixed(2)))].join(' ')}"` : ''} font-family="${esc(th.font)}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" id="${uid}" viewBox="${vb.x0} ${vb.y0} ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="${uid}-t${desc ? ` ${uid}-s` : ''}" data-loop="${r2(T)}" data-intro="${introEnd}"${o.background ? ` data-bg="${th.bg.to}"` : ''}${captions.length ? ` data-chapters="${esc(JSON.stringify(captions.map((c) => ({ t: +c.t.toFixed(2), text: c.text }))))}"` : ''}${keyTimes.length ? ` data-keys=""${[...new Set([...keyTimes, T - 0.95].map((t) => Math.max(0, Math.min(T - 0.05, t)).toFixed(2)))].join(' ')}"` : ''} font-family="${esc(th.font)}">`,
     `<title id="${uid}-t">${esc(title)}</title>`, desc ? `<desc id="${uid}-s">${esc(desc)}</desc>` : '',
     `<style>${css}</style>`,
     `<defs>${[...defs.values()].map((d) => d.svg).join('')}</defs>`,
     bg ? `<g>${bg}</g>` : '',
     wrap(floor + glowLayer + shadowLayer + linkLayer + ringLayer + floorFx, fadeIn(0, 0.6)),
     `<g>${sortedWorld}</g>`,
+    hazeSvg,
+    motes,
     air ? wrap(air, fadeIn(introEnd * 0.6)) : '',
     wrap(overlay, fadeIn(Math.max(0, introEnd - 0.35), 0.45)),
     captionSvg ? wrap(captionSvg, fadeIn(Math.max(0, introEnd - 0.2))) : '',

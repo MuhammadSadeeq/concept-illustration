@@ -26,7 +26,7 @@ for (const file of fs.readdirSync(examples).filter((f) => f.endsWith('.scene.mjs
 }
 
 // every kind in every theme
-for (const theme of iso.THEME_NAMES) {
+for (const theme of ['aurora', 'paper', 'clay', 'sunset', 'neon', 'mint']) {
   for (const kind of iso.KIND_NAMES) {
     try {
       const s = iso.scene({ theme });
@@ -62,7 +62,7 @@ for (const bad of RECIPE_NAMES) {
 // mistakes give useful messages
 const throws = (name, fn, re) => { try { fn(); ok(name, false, 'did not throw'); } catch (e) { ok(name, re.test(e.message), e.message); } };
 throws('unknown kind suggests', () => iso.scene({}).add('sever'), /Did you mean "server"/);
-throws('unknown theme lists themes', () => iso.scene({ theme: 'neon' }), /aurora/);
+throws('unknown theme lists themes', () => iso.scene({ theme: 'zzz' }), /aurora/);
 throws('unknown icon suggests', () => iso.scene({}).add('tile', { icon: 'lok' }), /Did you mean "lock"/);
 throws('bad at explains', () => iso.scene({}).add('cube', { at: 'left' }), /\[x, y\]/);
 throws('unknown method explains', () => iso.scene({}).animate(), /does not exist/);
@@ -83,6 +83,41 @@ throws('story needs steps', () => iso.scene({}).story('go'), /array of steps/);
   s.link(a, c);
   ok('link through an object is reported', s.build().notes.some((n) => n.code === 'link-through'));
 }
+
+// looks: every palette with every finish and floor, plus custom palettes
+for (const look of iso.PALETTE_NAMES) for (const finish of iso.FINISH_NAMES) {
+  try {
+    const s = iso.scene({ look, finish, floor: iso.FLOOR_NAMES[(look.length + finish.length) % iso.FLOOR_NAMES.length], title: 't' });
+    const a = s.add('server', { at: [0, 0], hero: true, label: 'A' }), b = s.add('laptop', { at: [4.5, 0], label: 'B' });
+    s.link(a, b); s.story([s.send(a, b), s.mark(b, 'check')]);
+    const svg = s.toSVG();
+    ok(`${look}/${finish}`, !/NaN|undefined|Infinity/.test(svg), (svg.match(/.{30}(NaN|undefined|Infinity).{30}/) || [''])[0]);
+  } catch (e) { ok(`${look}/${finish}`, false, e.message); }
+}
+{
+  const s = iso.scene({ palette: { bg: '#0f172a', accent: '#f97316' }, finish: 'soft', floor: 'plate', title: 'custom' });
+  s.add('cube', { at: [0, 0], hero: true });
+  ok('custom palette from two colours', !/NaN|undefined/.test(s.toSVG()));
+  const a = iso.scene({ title: 'How DNS works' }), b = iso.scene({ title: 'A bakery that delivers' });
+  ok('a look is picked from the title when none is given', a.look && b.look && a.notes.some((n) => n.code === 'no-look'));
+  ok('different titles can get different looks', new Set(['How DNS works', 'A bakery that delivers', 'Compound interest', 'Our onboarding flow', 'Vaccines', 'Queueing'].map((t) => iso.scene({ title: t }).look)).size >= 3);
+}
+throws('unknown finish lists finishes', () => iso.scene({ look: 'mint', finish: 'shiny' }), /solid/);
+throws('custom palette needs bg and accent', () => iso.scene({ palette: { bg: '#fff' } }), /bg and accent/);
+
+// objects that are not in the kit
+{
+  const s = iso.scene({ look: 'sand' });
+  s.define('oven', (o, sh, K) => ({ parts: [sh.box({ w: 1.4, d: 1.2, h: 1.1, color: o.color, left: (fw, fh) => [{ t: 'rect', x: 0.2, y: 0.3, w: fw - 0.4, h: fh - 0.5, fill: K.hex('screen') }] }), sh.cyl({ x: -0.3, z: 1.1, r: 0.12, h: 0.4, color: 'dark' })] }));
+  const oven = s.add('oven', { at: [0, 0], label: 'Oven', hero: true });
+  const one = s.custom({ at: [4, 0], label: 'Loaf', parts: (sh) => [sh.prism({ plane: 'left', at: [0, -0.3, 0], depth: 0.6, color: '#d9a05b', outline: [[-0.4, 0], [0.4, 0], [0.4, 0.3], [-0.4, 0.3]] }), sh.sphere({ z: 0.5, r: 0.1 }), sh.cone({ x: 0.3, r: 0.1, h: 0.3 })] });
+  const logo = s.svg('<circle cx="50" cy="50" r="40" fill="#f00"/>', { at: [8, 0], w: 1, h: 1, label: 'Logo' });
+  s.story([s.move(one, [4, 3]), s.pulse(oven)]);
+  const r = s.build();
+  ok('custom kinds are measured', oven.w > 1 && oven.h > 1 && one.h > 0.2);
+  ok('custom objects, raw svg and move render', !/NaN|undefined|Infinity/.test(r.svg) && r.svg.includes('<circle cx="50" cy="50" r="40"'));
+}
+throws('a builder must return parts', () => { const s = iso.scene({}); s.define('x', () => ({})); s.add('x'); }, /parts/);
 
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

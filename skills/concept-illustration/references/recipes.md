@@ -4,7 +4,7 @@ A recipe turns a short config into a complete scene: objects placed, links drawn
 
 ```js
 export default ({ recipes }) => recipes.pipeline({
-  theme: 'paper',
+  look: 'paper',
   title: 'From commit to production',
   stages: [
     { kind: 'laptop', label: 'Commit', ui: 'code' },
@@ -17,7 +17,8 @@ export default ({ recipes }) => recipes.pipeline({
 
 Rules shared by all recipes:
 
-- Every recipe accepts every scene option alongside its own: `theme`, `accent`, `accent2`, `title`, `heading`, `subheading`, `background`, `bg`, `grid`, `aspect`, `pad`, `loop`, `intro`, `font`.
+- Every recipe accepts every scene option alongside its own: `look`, `finish`, `floor`, `palette`, `accent`, `accent2`, `title`, `heading`, `subheading`, `background`, `bg`, `detail`, `aspect`, `pad`, `loop`, `intro`, `font`. Choose the look for the subject every time; a recipe decides the layout, not the art direction.
+- A `kind` may be one you defined yourself. Because `s.define` needs the scene first, add custom objects after the recipe returns, or build that scene by hand.
 - An item is `{ kind, label, sub, ...any option of that kind or of s.add }`, so `hero: true`, `color`, `scale`, `icon` and `ui` all work on an item. A plain string is shorthand for a `tile` with that label. Without `kind` you get a `tile`, so give it an `icon`.
 - `say: '...'` on an item sets the caption shown when the story reaches it. An item without `say` keeps the previous caption.
 - A recipe returns an ordinary scene. Keep adding to it before returning:

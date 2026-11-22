@@ -157,7 +157,7 @@ export function renderPrism(ctx, p) {
   if (p.cap !== false) {
     const capTone = toneFor(capMat, P.N, blend);
     let capFill = capTone;
-    if (p.flatCap !== true && !ol) {
+    if (p.flatCap !== true && !ol && !theme.flat) {
       const hi = plane === 'top' ? capMat.topLight : adjust(capTone, { dl: theme.dark ? 0.03 : 0.015 });
       const lo = plane === 'top' ? capMat.topShade : adjust(capTone, { dl: theme.dark ? -0.035 : -0.03 });
       const dir = plane === 'top' ? 'x1="0" y1="0" x2="1" y2="1"' : 'x1="0" y1="0" x2="0" y2="1"';

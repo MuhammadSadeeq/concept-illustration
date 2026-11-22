@@ -1,7 +1,7 @@
 // How a CDN answers a request: the first request misses the cache, the second is served at the edge.
 // Pattern: three actors in a row, one focal object, a story with a change of state halfway through.
 export default ({ scene }) => {
-  const s = scene({ theme: 'aurora', title: 'How a CDN answers a request' });
+  const s = scene({ look: 'aurora', title: 'How a CDN answers a request' });
 
   const visitor = s.add('laptop', { at: [0, 0], label: 'Visitor', ui: 'image' });
   const base = s.add('platform', { at: [5, 0], size: 2.3 });

@@ -1,7 +1,7 @@
 // Photosynthesis: light, water and air in; sugar and oxygen out.
 // Pattern: inputs converge on a hero, outputs leave it. A custom accent colour retunes the theme.
 export default ({ scene }) => {
-  const s = scene({ theme: 'clay', title: 'Photosynthesis', accent: '#23a566', accent2: '#3d8bff' });
+  const s = scene({ look: 'mint', floor: 'none', title: 'Photosynthesis', accent2: '#3d8bff' });
 
   const leaf = s.add('tree', { at: [0, 0], size: 1.9, label: 'Leaf', hero: true, color: 'accent' });
   const sun = s.add('sun', { at: [-4.6, -1.2], z: 2.2, label: 'Sunlight', float: { amp: 5 } });

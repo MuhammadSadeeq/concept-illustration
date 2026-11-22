@@ -129,7 +129,7 @@ export function snapPeriod(period, T) {
 
 // ---------------------------------------------------------------- story scheduling
 
-const DEFAULT_DUR = { pulse: 0.7, glow: 1.1, pop: 0.55, show: 0.45, hide: 0.4, lift: 0.7, drop: 0.6, tint: 0.5, untint: 0.5, shake: 0.5, say: 0, wait: 0.5, flash: 0.6, grow: 0.8, mark: 0.5, unmark: 0.3 };
+const DEFAULT_DUR = { pulse: 0.7, glow: 1.1, pop: 0.55, show: 0.45, hide: 0.4, lift: 0.7, drop: 0.6, tint: 0.5, untint: 0.5, shake: 0.5, say: 0, wait: 0.5, flash: 0.6, grow: 0.8, move: 1, mark: 0.5, unmark: 0.3 };
 
 /**
  * Lay steps out on a timeline. A plain array is a sequence; an array nested inside it runs in

@@ -99,8 +99,8 @@ An `<img>` cannot be paused from the page. To restart one, reassign its `src`.
 Build the scene twice and let the browser choose:
 
 ```bash
-node SKILL_DIR/scripts/build.mjs cache.scene.mjs --theme paper  --out img/light
-node SKILL_DIR/scripts/build.mjs cache.scene.mjs --theme aurora --out img/dark
+node SKILL_DIR/scripts/build.mjs cache.scene.mjs --look paper  --out img/light
+node SKILL_DIR/scripts/build.mjs cache.scene.mjs --look aurora --out img/dark
 ```
 
 ```html
@@ -110,7 +110,7 @@ node SKILL_DIR/scripts/build.mjs cache.scene.mjs --theme aurora --out img/dark
 </picture>
 ```
 
-For a scene that must sit on an arbitrary surface, build with `background: false` and choose the theme whose text colour reads on that surface (`paper`, `mono`, `clay`, `sunset` on light; `aurora`, `carbon`, `blueprint` on dark).
+For a scene that must sit on an arbitrary surface, build with `background: false` and choose a palette whose text colour reads on that surface: a light palette on a light surface, a dark one on a dark surface.
 
 ## Raster and video
 
@@ -150,7 +150,7 @@ The engine needs a JavaScript runtime. Without Node, run it in a browser instead
 <div id="stage"></div>
 <script type="module">
   import { scene } from './scripts/isokit.mjs';
-  const s = scene({ theme: 'aurora', title: 'Example' });
+  const s = scene({ look: 'aurora', title: 'Example' });
   const a = s.add('laptop', { at: [0, 0], label: 'Client' });
   const b = s.add('server', { at: [4.5, 0], label: 'Server', hero: true });
   s.link(a, b);

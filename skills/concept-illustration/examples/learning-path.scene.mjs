@@ -1,6 +1,6 @@
 // A climb from beginner to expert, built with the steps recipe.
 export default ({ recipes }) => recipes.steps({
-  theme: 'blueprint',
+  look: 'blueprint',
   title: 'From beginner to expert',
   steps: [
     { label: 'Learn', sub: 'follow along', say: 'First you follow instructions' },
