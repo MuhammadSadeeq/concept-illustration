@@ -29,6 +29,7 @@ export const PALETTES = {
   blueprint: { bg: '#123c96', surface: '#1f55c2', ink: '#06205e', accent: '#ffd84a', accent2: '#7ef0ff', finish: 'outline', floor: 'grid', mood: 'plans, engineering, schematics' },
   neon:      { bg: '#0b0b1a', surface: '#1b1b3a', ink: '#05050f', accent: '#00e5ff', accent2: '#ff3df2', finish: 'neon', floor: 'grid', mood: 'futuristic, electric, synth' },
   // ---- light
+  studio:    { bg: '#f4f4f2', surface: '#ffffff', ink: '#1c1c1c', accent: '#1f8f8f', accent2: '#f2784b', finish: 'line', floor: 'none', mood: 'refined line art, product detail, quiet confidence' },
   paper:     { bg: '#f5f6f8', surface: '#fbfcfe', ink: '#1d2433', accent: '#3f66ff', accent2: '#ff8a3d', finish: 'outline', floor: 'dots', mood: 'documentation, clarity, technical' },
   mono:      { bg: '#ffffff', surface: '#ffffff', ink: '#141414', accent: '#141414', accent2: '#8c8c8c', finish: 'outline', floor: 'none', mood: 'print, formal, minimal' },
   clay:      { bg: '#eceef8', surface: '#f3f4fb', ink: '#262a4f', accent: '#6a5cf0', accent2: '#ff7a59', finish: 'soft', floor: 'none', mood: 'friendly product, calm, premium' },
@@ -46,6 +47,7 @@ export const FINISHES = {
   solid:   'Shaded faces with rim light and layered shadows. The all-round finish.',
   soft:    'Rounder forms, gentler shading, broad diffuse shadows. Friendly and premium.',
   outline: 'Even ink lines with quiet fills. Technical and crisp (white lines on dark palettes).',
+  line:    'Hairline strokes, white forms, generous rounding, almost no shadow. For single-object vignettes.',
   flat:    'Three flat tones per object and long cast shadows. Graphic, like a poster.',
   neon:    'Dark bodies edged in light with strong glow. For dark palettes.',
 };
@@ -65,7 +67,7 @@ export const THEMES = PALETTES;
 export const ROLE_NAMES = ['body', 'body2', 'dark', 'muted', 'paper', 'screen', 'accent', 'accent2', 'ok', 'warn', 'danger', 'gold'];
 
 // Looks offered when a scene does not choose one. Specialised looks (mono, noir, blueprint, neon) are left out.
-const ROTATION = ['aurora', 'clay', 'mint', 'ocean', 'sand', 'plum', 'sky', 'forest', 'sunset', 'abyss', 'blossom', 'carbon', 'grape', 'paper', 'ember', 'lemon', 'slate'];
+const ROTATION = ['aurora', 'clay', 'mint', 'studio', 'ocean', 'sand', 'plum', 'sky', 'forest', 'sunset', 'abyss', 'blossom', 'carbon', 'grape', 'paper', 'ember', 'lemon', 'slate'];
 
 export function pickLook(seed) {
   let h = 0x811c9dc5;
@@ -78,6 +80,9 @@ function shading(finish, dark) {
     case 'soft': return dark
       ? { outline: 0, rim: 0.7, radius: 0.16, glow: 0.5, flat: false, shade: { top: 0.09, left: 0, right: -0.07, hue: 8, chroma: 1.05, tintLeft: 0.04, tintRight: 0.12, ao: 0.22 }, shadow: { kind: 'soft', alpha: 0.5, blur: 11, reach: 1.25 } }
       : { outline: 0, rim: 0.9, radius: 0.16, glow: 0.25, flat: false, shade: { top: 0.03, left: -0.035, right: -0.095, hue: 8, chroma: 1.1, tintLeft: 0.05, tintRight: 0.11, ao: 0.13 }, shadow: { kind: 'soft', alpha: 0.32, blur: 11, reach: 1.25 } };
+    case 'line': return dark
+      ? { outline: 1.1, rim: 0, radius: 0.2, glow: 0.2, flat: true, shade: { top: 0.02, left: 0, right: -0.02, hue: 0, chroma: 1, tintLeft: 0, tintRight: 0.04, ao: 0 }, shadow: { kind: 'soft', alpha: 0.25, blur: 6, reach: 0.6 } }
+      : { outline: 1.1, rim: 0, radius: 0.2, glow: 0, flat: true, shade: { top: 0, left: -0.006, right: -0.028, hue: 0, chroma: 1, tintLeft: 0, tintRight: 0.02, ao: 0 }, shadow: { kind: 'soft', alpha: 0.07, blur: 6, reach: 0.6 } };
     case 'outline': return dark
       ? { outline: 1.4, rim: 0, radius: 0.04, glow: 0.3, flat: true, shade: { top: 0.045, left: 0, right: -0.04, hue: 0, chroma: 1, tintLeft: 0, tintRight: 0.1, ao: 0 }, shadow: { kind: 'soft', alpha: 0.4, blur: 5, reach: 0.8 } }
       : { outline: 1.5, rim: 0, radius: 0.05, glow: 0, flat: true, shade: { top: 0.03, left: -0.012, right: -0.06, hue: 0, chroma: 1, tintLeft: 0.02, tintRight: 0.07, ao: 0 }, shadow: { kind: 'soft', alpha: 0.13, blur: 4, reach: 0.8 } };
@@ -212,6 +217,8 @@ export function material(theme, color = 'body') {
     onSide: readableOn(left, '#ffffff', theme.dark ? '#0b0e22' : theme.text.color),
     ink: theme.ink,
   };
+  // Hairline finish: a coloured form is edged in a deeper shade of its own colour, not in black.
+  if (theme.finish === 'line' && o.c > 0.05) m.ink = fromLch({ l: Math.max(0.2, o.l - 0.2), c: o.c * 1.05, h: o.h });
   // Outlined finishes: an outline has to stay visible against the surface it encloses.
   if (theme.outline && contrast(m.ink, left) < 1.6) m.ink = readableOn(left, '#ffffff', '#141414');
   theme._mats.set(key, m);

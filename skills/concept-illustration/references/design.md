@@ -32,16 +32,18 @@ Decide the look before placing an object. Ask four questions.
 | Playful, young, energetic | `lemon` `grape` `sunset` `plum` | `flat`, `soft` |
 | Calm, premium, considered | `clay` `sand` `mint` `plum` | `soft` |
 | Formal, printed, archival | `mono` `noir` `slate` `paper` | `outline` |
+| Minimal, product-like, quietly confident | `studio` `mono` `clay` | `line`, `soft` |
 
 **2. Where will it live?** A dark page needs a dark palette and a light page a light one, or the image becomes a rectangle stuck on the page. If the page colour is known use `bg`; if the image should float on the page use `background: false`.
 
-**3. Is there a brand?** Then the brand decides. Pass `palette: { bg, accent, accent2 }` or override `accent`. Choose a mid-tone from the brand palette for the accent: very light or very dark colours lose their shading.
+**3. Is there a brand?** Then the brand decides. For one brand colour keep a built-in look and set `accent: '#hex'`; for a full scheme pass `palette: { bg, accent, accent2 }` (it needs `bg` and `accent`). Choose a mid-tone from the brand palette for the accent: very light or very dark colours lose their shading.
 
 **4. What should the finish say?**
 
 - `solid`: the object is real and has weight. The natural choice for hero images.
 - `soft`: friendly, touchable, premium. Rounder corners, diffuse shadows.
 - `outline`: this is a drawing that explains. Best beside text, in documentation, where precision matters more than atmosphere.
+- `line`: almost nothing but form. White surfaces, hairlines, generous rounding, and colour only where you put the accent. It rewards few objects and exact proportions, and punishes clutter. The natural finish for a vignette.
 - `flat`: bold and graphic, like a poster or an editorial spot. Long cast shadows give direction and energy.
 - `neon`: light itself is the material. For futuristic or electric subjects on dark palettes only.
 
@@ -188,12 +190,28 @@ Motion shows cause and effect. Everything else is noise.
 | `--experience step` | The reader needs to control the pace: teaching, onboarding, a product tour |
 | `--experience scroll` | The scene accompanies a long article and should advance with it |
 
+## Vignettes
+
+Sometimes the clearest picture of an idea is one small machine doing one thing. A vignette has a single object, no labels, no links and no captions; its parts act the idea out on a loop. A press stamps each document: approval. A turntable shares parcels between two lanes: routing. A lighthouse sweeps its beam: watching.
+
+Choose it when the idea is a *behaviour* that has a physical cousin (filter, gate, sort, press, lift, pour, lock, scan, balance, merge), and when the slot is a hero, a feature card or a section opener rather than a diagram.
+
+- **Find the cousin.** Ask what real mechanism already does this. A rate limiter is a turnstile. A cache is a shelf beside a door. A retry is a ball that rolls back down a ramp. A queue is a chute.
+- **Reduce it.** Two to five parts: what stays still, what moves, what is acted upon. If you need a label to explain a part, the mechanism is wrong or too detailed.
+- **Make the object plausible.** Parts must be held by something: a head needs a ram, a gate needs posts, a belt needs a bed. A part floating in the air breaks the illusion at once.
+- **One colour.** The part that does the work takes the accent; the thing it acts on takes a second, quieter colour at most; everything else is neutral.
+- **Choreograph weight.** Things wait, then move, then rest. Heavy things gather speed going down (`ease: 'in'`) and settle (`'out'`); light things can overshoot (`'back'`); belts and sweeps are `linear`. Hold the result long enough to be seen: at least half a second.
+- **Cause first.** The gate is open before the parcel arrives. The seal appears as the head lands, not after.
+- **Generous frame.** The object should take about half the frame's width, with calm space around it.
+
+A vignette is not a smaller diagram. If the idea has three named actors exchanging things, it is a scene, and labels will serve it better.
+
 ## Variety
 
 Sameness is the commonest failure of generated illustration. Guard against it deliberately.
 
 - **Never start from the last scene's look.** Choose again from the subject.
-- **Rotate the big decisions**: dark or light, finish, floor, layout shape, which object is tall.
+- **Rotate the big decisions**: dark or light, finish, floor, layout shape, which object is tall, and the form itself: a labelled scene, a recipe, a vignette, an interactive walk-through.
 - **Build at least one object for the subject** whenever the kit's nearest match is generic.
 - **Change the hero.** It is not always a server in the middle. It can be the person, the result, the thing that changes.
 - **In a series**, hold the look and the cast constant and vary composition and story, so the pieces are siblings, not twins.
@@ -217,7 +235,7 @@ Look at the sheet or the preview and answer honestly:
 4. Is there depth: a back, a middle, a front, different heights?
 5. Is any object the nearest available one rather than the right one? Build the right one.
 6. Could you delete an object or a label without losing the claim? Delete it.
-7. Does each motion have a cause you can see? Does the last frame before the loop restarts show the result?
+7. Does each motion have a cause you can see? Does the last frame before the loop restarts show the result? Is every moving part held by something?
 8. Would it still work as a still, in greyscale?
 
 Fix the weakest answer and build again. Two passes of this review improve a scene more than any added detail.

@@ -120,6 +120,7 @@ Sizes are footprint width × depth × height in cells, at `scale: 1`.
 
 - **`facing`**: `'left'` (default) turns the front toward the lower-left of the picture, `'right'` toward the lower-right. Point screens and signs toward the object they relate to, or toward the centre of the scene.
 - **`color`** recolours the body; **`accent`** recolours details. Both take a role or a hex. `hero: true` sets `color: 'accent'` for you.
+- Some kinds show a large area of accent colour by default: the `house` roof, the `truck` cab, the `flag`, the `pin`. When such an object is not the hero, pass `accent: 'muted'` (or `'body2'`) so the scene's one strong colour stays with the hero.
 - **`icon`** takes any name from the list below. **`text`** takes a few characters and overrides `icon`.
 
 ## Icons
@@ -156,7 +157,7 @@ Icons on a top face lie on the floor plane, so diagonal strokes look horizontal 
 | `'login'` | An avatar, two fields and a button |
 | `'blank'` | Nothing |
 | `'icon:<name>'` | One icon, centred |
-| `'text:<short>'` | A few characters, centred |
+| `'text:<short>'` | Up to about 6 characters, centred (`'text:200 OK'` is the limit; longer text is cut off by the screen edge) |
 
 Choose the content that tells what the screen is for: `code` for a developer, `chat` for a conversation, `dash` for monitoring.
 

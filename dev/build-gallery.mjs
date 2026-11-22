@@ -28,7 +28,7 @@ for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.scene.mjs')).s
 }
 
 // 2. one scene in nine different looks (palette : finish : floor)
-const LOOKS = ['aurora', 'neon', 'plum:soft:plate', 'forest', 'sand', 'mint', 'lemon', 'paper', 'noir'];
+const LOOKS = ['aurora', 'neon', 'plum:soft:plate', 'forest', 'sand', 'mint', 'lemon', 'studio', 'noir'];
 for (const spec of LOOKS) {
   const [look, finish, floor] = spec.split(':');
   const s = iso.scene({ look, finish, floor, title: `${spec} look`, pad: 40, intro: false });

@@ -3,7 +3,7 @@
 
 import {
   UNIT, SPHERE_K, PLANES, VIEW, proj, projP, planePoint, planeMatrix, signedArea, polyPath,
-  dot3, cross3, norm3, sub3, add3, mul3, aabb, r1, r2, esc, circleOutline,
+  dot3, cross3, norm3, sub3, add3, mul3, aabb, r1, r2, esc, circleOutline, depthSort,
 } from './geom.mjs';
 import { toneFor } from './themes.mjs';
 import { blend, rgba, adjust, mix } from './color.mjs';
@@ -296,12 +296,20 @@ export function renderLine(ctx, p) {
 // ---------------------------------------------------------------- flat artwork on a plane
 
 const attrs = (it, ctx) => {
-  const style = [it.style, it.anim && ctx ? ctx.animStyle(it.anim) : ''].filter(Boolean).join(';');
+  const style = [it.style, it.anim && ctx ? ctx.animStyle(it.anim, it.flat !== false) : ''].filter(Boolean).join(';');
   return (it.cls ? ` class="${it.cls}"` : '') + (style ? ` style="${style}"` : '') + (it.id ? ` id="${it.id}"` : '');
 };
-const paint = (it) => {
-  let s = ` fill="${it.fill || 'none'}"`;
-  if (it.fillOp != null && it.fillOp < 1) s += ` fill-opacity="${it.fillOp}"`;
+const paint = (it, ctx) => {
+  let s;
+  if (it.fade && it.fill && ctx) {
+    // fade: [x1, y1, x2, y2] — the fill is at full strength at the first point and gone at the second
+    const [x1, y1, x2, y2] = it.fade, op = it.fillOp ?? 1;
+    const id = ctx.def(`fade|${it.fill}|${it.fade.join(',')}|${op}`, (gid) => `<linearGradient id="${gid}" gradientUnits="userSpaceOnUse" x1="${r2(x1)}" y1="${r2(y1)}" x2="${r2(x2)}" y2="${r2(y2)}"><stop offset="0" stop-color="${it.fill}" stop-opacity="${op}"/><stop offset="1" stop-color="${it.fill}" stop-opacity="0"/></linearGradient>`);
+    s = ` fill="url(#${id})"`;
+  } else {
+    s = ` fill="${it.fill || 'none'}"`;
+    if (it.fillOp != null && it.fillOp < 1) s += ` fill-opacity="${it.fillOp}"`;
+  }
   if (it.stroke) s += ` stroke="${it.stroke}" stroke-width="${it.sw ?? 0.04}" stroke-linecap="round" stroke-linejoin="round"`;
   if (it.dash) s += ` stroke-dasharray="${it.dash}"`;
   if (it.op != null && it.op < 1) s += ` opacity="${it.op}"`;
@@ -314,22 +322,22 @@ export function renderFlat(ctx, items) {
     if (!it) continue;
     switch (it.t) {
       case 'rect':
-        out += `<rect x="${r2(it.x)}" y="${r2(it.y)}" width="${r2(it.w)}" height="${r2(it.h)}"${it.r ? ` rx="${r2(Math.min(it.r, it.w / 2, it.h / 2))}"` : ''}${paint(it)}${attrs(it, ctx)}/>`;
+        out += `<rect x="${r2(it.x)}" y="${r2(it.y)}" width="${r2(it.w)}" height="${r2(it.h)}"${it.r ? ` rx="${r2(Math.min(it.r, it.w / 2, it.h / 2))}"` : ''}${paint(it, ctx)}${attrs(it, ctx)}/>`;
         break;
       case 'circle':
-        out += `<circle cx="${r2(it.cx)}" cy="${r2(it.cy)}" r="${r2(it.r)}"${paint(it)}${attrs(it, ctx)}/>`;
+        out += `<circle cx="${r2(it.cx)}" cy="${r2(it.cy)}" r="${r2(it.r)}"${paint(it, ctx)}${attrs(it, ctx)}/>`;
         break;
       case 'ellipse':
-        out += `<ellipse cx="${r2(it.cx)}" cy="${r2(it.cy)}" rx="${r2(it.rx)}" ry="${r2(it.ry)}"${paint(it)}${attrs(it, ctx)}/>`;
+        out += `<ellipse cx="${r2(it.cx)}" cy="${r2(it.cy)}" rx="${r2(it.rx)}" ry="${r2(it.ry)}"${paint(it, ctx)}${attrs(it, ctx)}/>`;
         break;
       case 'line':
-        out += `<path d="M${r2(it.x1)} ${r2(it.y1)}L${r2(it.x2)} ${r2(it.y2)}"${paint({ ...it, fill: 'none', stroke: it.stroke || '#000' })}${attrs(it, ctx)}/>`;
+        out += `<path d="M${r2(it.x1)} ${r2(it.y1)}L${r2(it.x2)} ${r2(it.y2)}"${paint({ ...it, fill: 'none', stroke: it.stroke || '#000' }, ctx)}${attrs(it, ctx)}/>`;
         break;
       case 'path':
-        out += `<path d="${it.d}"${paint(it)}${it.rule ? ` fill-rule="${it.rule}"` : ''}${attrs(it, ctx)}/>`;
+        out += `<path d="${it.d}"${paint(it, ctx)}${it.rule ? ` fill-rule="${it.rule}"` : ''}${attrs(it, ctx)}/>`;
         break;
       case 'poly':
-        out += `<path d="M${it.pts.map((q) => `${r2(q[0])} ${r2(q[1])}`).join('L')}${it.open ? '' : 'Z'}"${paint(it)}${attrs(it, ctx)}/>`;
+        out += `<path d="M${it.pts.map((q) => `${r2(q[0])} ${r2(q[1])}`).join('L')}${it.open ? '' : 'Z'}"${paint(it, ctx)}${attrs(it, ctx)}/>`;
         break;
       case 'text': {
         const size = it.size || 0.3;
@@ -408,16 +416,22 @@ export function renderPrim(ctx, p) {
     case 'mesh': inner = renderMesh(ctx, p); break;
     case 'sphere': inner = renderSphere(ctx, p); break;
     case 'cone': inner = renderCone(ctx, p); break;
-    case 'line': return renderLine(ctx, p);
-    case 'decal': return renderDecal(ctx, p);
+    case 'line': inner = renderLine(ctx, { ...p, anim: null }); break;
+    case 'decal': inner = renderDecal(ctx, p); break;
     case 'raw': {
       const [x, y] = projP(p.at);
-      return `<g transform="translate(${f(x)} ${f(y)})${p.scale ? ` scale(${p.scale})` : ''}">${typeof p.svg === 'function' ? p.svg(ctx) : p.svg}</g>`;
+      inner = `<g transform="translate(${f(x)} ${f(y)})${p.scale ? ` scale(${p.scale})` : ''}">${typeof p.svg === 'function' ? p.svg(ctx) : p.svg}</g>`;
+      break;
     }
-    case 'group': inner = p.parts.map((c) => renderPrim(ctx, c)).join(''); break;
+    case 'group':
+      // sort: false draws the parts exactly as listed, back to front, for parts that slide inside one another
+      inner = (p.sort === false ? p.parts.filter(Boolean) : depthSort(p.parts.filter(Boolean).map((c) => ({ aabb: primBox(c), c }))).map((it) => it.c)).map((c) => renderPrim(ctx, c)).join('');
+      break;
     default: throw new Error(`Unknown primitive "${p.t}".`);
   }
-  if (p.wrap) return `<g${attrs(p.wrap, ctx)}>${inner}</g>`;
+  // a shape (or a group of shapes) can move as one: anim is given in world cells
+  const w = p.wrap || (p.anim ? { anim: p.anim } : null);
+  if (w) return `<g${attrs({ ...w, flat: false }, ctx)}>${inner}</g>`;
   return inner;
 }
 

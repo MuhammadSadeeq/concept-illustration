@@ -43,9 +43,21 @@ Every image below is a single SVG file animated with plain CSS. No JavaScript ru
   </tr>
 </table>
 
+## Mechanisms, not only diagrams
+
+Sometimes the clearest picture of an idea is one small machine doing one thing. A vignette has a single object and no labels; its parts act the idea out. Parts slide, lift, turn, wait and hold on one shared clock, with weight and easing.
+
+<table>
+  <tr>
+    <td width="33%"><img src="gallery/approval-press.svg" alt="A press lowers onto each document as it passes and leaves a seal on it"><br><sub><b>Approval</b> · studio palette, hairline finish</sub></td>
+    <td width="33%"><img src="gallery/parcel-sorter.svg" alt="Parcels arrive on one belt and a turntable sends them down two lanes in turn"><br><sub><b>Routing</b> · sand palette, soft finish</sub></td>
+    <td width="33%"><img src="gallery/lighthouse.svg" alt="A lighthouse sweeps a fading beam of light over the water while a small boat floats nearby"><br><sub><b>Keeping watch</b> · abyss palette, ring floor</sub></td>
+  </tr>
+</table>
+
 ## One scene, many looks
 
-A look is three independent choices: a **palette** (21 built in, or any brand colours), a **finish** (solid, soft, outline, flat, neon) and a **floor** (grid, dots, a raised plate, rings, none). Every combination is coherent because all tones are derived from the palette in a perceptual colour space. There is no default look: the skill directs the agent to choose for the subject, and a scene that chooses nothing gets one picked from its title.
+A look is three independent choices: a **palette** (22 built in, or any brand colours), a **finish** (solid, soft, outline, hairline, flat, neon) and a **floor** (grid, dots, a raised plate, rings, none). Every combination is coherent because all tones are derived from the palette in a perceptual colour space. There is no default look: the skill directs the agent to choose for the subject, and a scene that chooses nothing gets one picked from its title.
 
 <table>
   <tr>
@@ -60,7 +72,7 @@ A look is three independent choices: a **palette** (21 built in, or any brand co
   </tr>
   <tr>
     <td><img src="gallery/look-lemon.svg" alt="lemon look"></td>
-    <td><img src="gallery/look-paper.svg" alt="paper look"></td>
+    <td><img src="gallery/look-studio.svg" alt="studio look"></td>
     <td><img src="gallery/look-noir.svg" alt="noir look"></td>
   </tr>
 </table>
@@ -104,7 +116,7 @@ node skills/concept-illustration/scripts/build.mjs cache.scene.mjs --sheet
 
 The engine takes it from there:
 
-- **Geometry and light.** True isometric projection, exact depth ordering, three-tone shading, a contact shadow and a cast shadow per object, rim light, depth haze.
+- **Geometry and light.** True isometric projection, exact depth ordering, three-tone shading, a contact shadow and a cast shadow that follow each object's real footprint, rim light, depth haze.
 - **Detail.** Sockets where links start, trails behind moving tokens, bursts on state badges, motes of light around a glowing hero, blinking status lights, glare and live content on screens.
 - **Layout.** Connectors route along the floor grid and stop where an object's outline begins. Labels pick the side with room. The frame crops to the content.
 - **Motion.** A story of cause and effect compiles to CSS keyframes. Tokens pass correctly behind and in front of objects. Loops close exactly, so exported video and GIFs never jump.
@@ -114,9 +126,10 @@ The engine takes it from there:
 
 Fifty objects and ninety-five icons cover a lot, and the skill tells the agent to go past them whenever the subject needs it:
 
-- **Any object.** `s.define` builds new objects from the same shapes the kit uses (blocks, cylinders, extrusions, cones, spheres, artwork on faces, moving parts). The bakery scene above defines its own oven and loaf in twenty lines.
+- **Any object.** `s.define` builds new objects from the same shapes the kit uses (blocks, cylinders, extrusions, cones, spheres, artwork on faces). The bakery scene above defines its own oven and loaf in twenty lines.
+- **Any mechanism.** Parts of an object can run keyframed sequences of their own, which is how the three vignettes above are made. Each is about fifty lines.
 - **Any drawing.** `s.svg` stands arbitrary SVG artwork in the scene.
-- **Real movement.** Objects slide, rise out of the floor, lift, appear and change state; tokens can be any object.
+- **Real movement.** Objects slide, rise out of the floor, lift, appear and change state; tokens can be any object. Objects can also be translucent, or ghosted to stand for something planned or missing.
 - **Experiences.** `--experience step` produces an interactive page where a reader walks through the story one caption at a time; `scroll` ties it to the page scroll; objects answer a hover or tap with a detail card. Open [`gallery/request-lifecycle.experience.html`](gallery/request-lifecycle.experience.html) locally to try one.
 
 ## Built to work with small models
@@ -125,7 +138,7 @@ Good illustration needs judgement that small models do not reliably have. The sk
 
 - **Recipes** for seven common shapes (pipeline, hub, layers, cycle, fan-out, growth, steps) turn a ten-line config into a finished scene.
 - **Forgiving input.** Near-miss option names are accepted, typos get a "did you mean", and errors name the line.
-- **Tested the hard way.** Unseen briefs, from OAuth to vaccines to a bakery's delivery flow, were given to a small, fast model with nothing but this skill. Every run built clean on the first attempt; their feedback shaped the instructions.
+- **Tested the hard way.** Unseen briefs, from OAuth to vaccines to a farm's delivery flow, were given to a small, fast model with nothing but this skill. Every run ended in a finished scene with a clean report, nearly all at the first build, including ones with custom-built objects and an interactive walk-through. Whatever tripped them up was fed back into the instructions and the engine.
 
 ## The kit
 

@@ -61,7 +61,7 @@ export function compile(sc) {
       if (sameEnd(lk.a, st.from) && sameEnd(lk.b, st.to)) return lk.path;
       if (sameEnd(lk.a, st.to) && sameEnd(lk.b, st.from)) return reversePath(lk.path);
     }
-    if (st.from.obj && st.to.obj) note('hint', 'send-no-link', `send(${st.from.obj.id} → ${st.to.obj.id}) has no link between the two objects, so the token crosses open floor. Add s.link(${st.from.obj.id}, ${st.to.obj.id}) so viewers see the route.`);
+    if (st.from.obj && st.to.obj) note('hint', 'send-no-link', `send(${st.from.obj.id} → ${st.to.obj.id}) has no link between the two objects, so the token crosses open floor. Add s.link(${st.from.obj.id}, ${st.to.obj.id}) so viewers see the route (steer it around other objects with route or via), or drop this step.`);
     return sc._route(st.from, st.to, {});
   };
   const track = (ob, name, prop, init) => ob.tracks[name] || (ob.tracks[name] = new Track(prop, init));
@@ -79,8 +79,9 @@ export function compile(sc) {
       const n = st.count ?? 1;
       return clamp(st._path.total / (st.speed ?? speed), 0.6, 2.6) + (n - 1) * (st.stagger ?? 0.22);
     };
-    const { items, end } = schedule(sc.steps, 0.35, sc.storyOpts.gap ?? 0.12, durOf);
-    T = Math.max(end + (sc.storyOpts.hold ?? 0.9), o.loop ?? 0);
+    const { items, end, read } = schedule(sc.steps, 0.35, sc.storyOpts.gap ?? 0.12, durOf);
+    // the last caption also gets its reading time before the loop restarts
+    T = Math.max(end + (sc.storyOpts.hold ?? 0.9), read.since + read.need + 0.6, o.loop ?? 0);
     T = Math.ceil(T * 10) / 10;
     for (const st of items) {
       const ob = st.obj;
@@ -174,8 +175,35 @@ export function compile(sc) {
     mat: (c) => material(th, c || 'body'),
     def,
     clipId: (k) => `${uid}-${k}`,
-    animStyle(a) {
+    // flat: the animated thing is artwork on a plane (units are cells in that plane);
+    // otherwise it is a shape in space (moves are [dx, dy, dz] in cells and are projected).
+    animStyle(a, flat = true) {
+      const shift = (m) => (flat ? [(m[0] || 0), (m[1] || 0)] : proj(m[0] || 0, m[1] || 0, m[2] || 0));
+      const tf = (k) => {
+        const parts = [];
+        if (k.move) { const [x, y] = shift(k.move); parts.push(`translate(${r2(x)}px,${r2(y)}px)`); }
+        if (k.rotate != null) parts.push(`rotate(${r2(k.rotate)}deg)`);
+        if (k.scale != null) parts.push(`scale(${r2(k.scale)})`);
+        return `${parts.length ? `transform:${parts.join(' ')}` : 'transform:none'}${k.opacity != null ? `;opacity:${r2(k.opacity)}` : ''}`;
+      };
       switch (a.type) {
+        case 'move': case 'swing': {
+          // there and back again, resting at each end
+          const P = snapPeriod(a.period || 3, T), h = clamp(a.hold ?? 0.15, 0, 0.45) * 50;
+          const A = a.type === 'move' ? { move: [0, 0, 0] } : { rotate: a.from ?? -20 };
+          const B = a.type === 'move' ? { move: a.by || [0, 0, 0.5] } : { rotate: a.to ?? 20 };
+          const e = `;animation-timing-function:${EASE[a.ease] || EASE.inOut}`;
+          return loopStyle(`0%{${tf(A)}}${r2(h)}%{${tf(A)}${e}}50%{${tf(B)}}${r2(50 + h)}%{${tf(B)}${e}}100%{${tf(A)}}`, { period: P, delay: -(a.phase || 0) * P });
+        }
+        case 'keys': {
+          // a keyframed sequence: keys: [{ at: 0..1, move, rotate, scale, opacity, ease }]
+          const P = snapPeriod(a.period || 4, T);
+          const ks = [...(a.keys || [])].sort((x, y) => x.at - y.at);
+          if (!ks.length) return '';
+          if (ks[0].at > 0) ks.unshift({ ...ks[0], at: 0 });
+          if (ks[ks.length - 1].at < 1) ks.push({ ...ks[0], at: 1 });
+          return loopStyle(ks.map((k) => `${r2(clamp(k.at, 0, 1) * 100)}%{${tf(k)};animation-timing-function:${EASE[k.ease] || EASE.inOut}}`).join(''), { period: P, delay: -(a.phase || 0) * P });
+        }
         case 'blink': {
           const P = snapPeriod(a.period || 2.4, T);
           return loopStyle(`0%,100%{opacity:1}50%{opacity:${a.min ?? 0.25}}`, { period: P, delay: -(a.phase || 0) * P, ease: 'ease-in-out' });
@@ -279,6 +307,16 @@ export function compile(sc) {
   const hiddenAttr = (ob) => (ob.hidden ? ' opacity="0"' : '');
 
   const shadowOf = (ob) => {
+    if (ob.opts.ghost) {
+      // a ghost stands for something absent or still to come: no shadow, a dashed footprint instead
+      const gw = ob.res.w * ob.k + 0.3, gd = ob.res.d * ob.k + 0.3;
+      const ol = ob.res.round ? circleOutline(1, 0, 0, 28).map(([a, b]) => [(a * gw) / 2, (b * gd) / 2]) : rectOutline(gw, gd, Math.min(0.24, gw / 3, gd / 3));
+      const [gx, gy] = proj(ob.x, ob.y, ob.parent ? ob.z : 0);
+      let mark = `<path d="${polyPath(ol.map(([a, b]) => proj(a, b, 0)))}" fill="none" stroke="${th.text.color}" stroke-opacity="0.5" stroke-width="1.2" stroke-dasharray="4 4" stroke-linecap="round"/>`;
+      mark = wrap(mark, opacityStyle(ob), hiddenAttr(ob));
+      if (ob.tracks.move) mark = wrap(mark, trackStyle(ob.tracks.move));
+      return `<g transform="translate(${r1(gx)} ${r1(gy)})">${mark}</g>`;
+    }
     if (!o.shadows || th.shadow.kind === 'none' || ob.opts.shadow === false) return '';
     const sh = ob.res.shadow || {};
     const k = ob.k;
@@ -287,28 +325,33 @@ export function compile(sc) {
     const baseZ = ob.parent ? ob.z : 0;
     const round = sh.r != null || sh.round || (ob.res.round && sh.w == null);
     const sw = (sh.w ?? ob.res.w) * k, sd = (sh.d ?? ob.res.d) * k;
-    let outline = round ? (sh.r != null ? circleOutline(sh.r * k, 0, 0, 28) : circleOutline(1, 0, 0, 28).map(([a, b]) => [(a * sw) / 2, (b * sd) / 2])) : rectOutline(sw, sd, Math.min(0.18, sw / 3, sd / 3));
+    const outlines = sh.rects
+      ? sh.rects.map((q) => rectOutline((q.x1 - q.x0) * k, (q.y1 - q.y0) * k, Math.min(0.18, ((q.x1 - q.x0) * k) / 3, ((q.y1 - q.y0) * k) / 3), ((q.x0 + q.x1) / 2) * k, ((q.y0 + q.y1) / 2) * k))
+      : [round ? (sh.r != null ? circleOutline(sh.r * k, 0, 0, 28) : circleOutline(1, 0, 0, 28).map(([a, b]) => [(a * sw) / 2, (b * sd) / 2])) : rectOutline(sw, sd, Math.min(0.18, sw / 3, sd / 3))];
+    // every outline is grown about its own centre, so separate pieces stay separate
+    const shape = (g, dx = 0, dy = 0) => outlines.map((ol) => {
+      const cx = ol.reduce((t, q) => t + q[0], 0) / ol.length, cy = ol.reduce((t, q) => t + q[1], 0) / ol.length;
+      return polyPath(ol.map(([a, b]) => proj(cx + (a - cx) * g + dx, cy + (b - cy) * g + dy, 0)));
+    }).join('');
     let body;
     if (th.shadow.kind === 'cast' && !soft && !ob.parent) {
       const hh = Math.min(ob.h, 2.6);
       const dx = 0.5 * hh, dy = -0.26 * hh;
-      const pts = hull([...outline, ...outline.map(([a, b]) => [a + dx, b + dy])]);
-      body = `<path d="${polyPath(pts.map(([a, b]) => proj(a, b, 0)))}" fill="${th.shadow.color}" fill-opacity="${th.shadow.alpha}"/>`;
-      body += `<path d="${polyPath(outline.map(([a, b]) => proj(a * 1.04, b * 1.04, 0)))}" fill="${th.shadow.color}" fill-opacity="${r2(th.shadow.alpha * 0.7)}" filter="url(#${blurFilter(2)})"/>`;
+      const thrown = outlines.map((ol) => polyPath(hull([...ol, ...ol.map(([a, b]) => [a + dx, b + dy])]).map(([a, b]) => proj(a, b, 0)))).join('');
+      body = `<path d="${thrown}" fill="${th.shadow.color}" fill-opacity="${th.shadow.alpha}"/>`;
+      body += `<path d="${shape(1.04)}" fill="${th.shadow.color}" fill-opacity="${r2(th.shadow.alpha * 0.7)}" filter="url(#${blurFilter(2)})"/>`;
     } else if (ob.parent || soft) {
       const g = ob.parent ? 1.03 : 0.92;
       const blur = ob.parent ? 2 : th.shadow.kind === 'cast' ? 6 : th.shadow.blur * 1.35;
       const alpha = ob.parent ? th.shadow.alpha : (th.shadow.kind === 'cast' ? 0.3 : th.shadow.alpha) * 0.6;
-      body = `<path d="${polyPath(outline.map(([a, b]) => proj(a * g, b * g, 0)))}" fill="${th.shadow.color}" fill-opacity="${r2(alpha)}" filter="url(#${blurFilter(blur)})"/>`;
+      body = `<path d="${shape(g)}" fill="${th.shadow.color}" fill-opacity="${r2(alpha)}" filter="url(#${blurFilter(blur)})"/>`;
     } else {
       // Two layers read as real light: a tight dark contact shadow where the object meets the
       // floor, and a wider, softer one thrown away from the light that grows with height.
-      const hh = Math.min(ob.h, 2.8), reach = th.shadow.reach ?? 1;
+      const hh = Math.min(sh.rects ? Math.min(ob.h, 0.9) : ob.h, 2.8), reach = th.shadow.reach ?? 1;
       const off = [(0.12 + hh * 0.2) * reach, -(0.04 + hh * 0.07) * reach];
-      const cast = outline.map(([a, b]) => proj(a * 1.12 + off[0], b * 1.12 + off[1], 0));
-      const contact = outline.map(([a, b]) => proj(a * 1.04 + 0.03, b * 1.04, 0));
-      body = `<path d="${polyPath(cast)}" fill="${th.shadow.color}" fill-opacity="${r2(th.shadow.alpha * 0.55)}" filter="url(#${blurFilter(r1(th.shadow.blur * (1 + hh * 0.18)))})"/>`
-        + `<path d="${polyPath(contact)}" fill="${th.shadow.color}" fill-opacity="${r2(Math.min(0.75, th.shadow.alpha * 0.95))}" filter="url(#${blurFilter(2.2)})"/>`;
+      body = `<path d="${shape(1.12, off[0], off[1])}" fill="${th.shadow.color}" fill-opacity="${r2(th.shadow.alpha * 0.55)}" filter="url(#${blurFilter(r1(th.shadow.blur * (1 + hh * 0.18)))})"/>`
+        + `<path d="${shape(1.04, 0.03, 0)}" fill="${th.shadow.color}" fill-opacity="${r2(Math.min(0.75, th.shadow.alpha * 0.95))}" filter="url(#${blurFilter(2.2)})"/>`;
     }
     const [sx, sy] = proj(ob.x, ob.y, baseZ);
     const fl = floatStyleOf.get(ob);
@@ -477,6 +520,8 @@ export function compile(sc) {
       const off = (1 - ob.level) * ob.h * UNIT;
       inner = `<g clip-path="url(#${clip})"><g${off ? ` transform="translate(0 ${r1(off)})"` : ''}${ob.tracks.grow ? ` style="${trackStyle(ob.tracks.grow)}"` : ''}>${inner}</g></g>`;
     }
+    const fade = ob.opts.ghost ? 0.28 : ob.opts.opacity;
+    if (fade != null && fade < 1) inner = `<g opacity="${r2(clamp(fade, 0, 1))}">${inner}</g>`;
     inner = wrap(inner, opacityStyle(ob), hiddenAttr(ob));
     if (ob.tracks.scale) inner = wrap(inner, trackStyle(ob.tracks.scale));
     const fl = floatStyleOf.get(ob);
@@ -627,6 +672,16 @@ export function compile(sc) {
   for (const c of sc.callouts) { const [ax, ay] = projP(c.at); overlay += calloutSvg(ax, ay, c); }
   const solid = sc.objs.filter((ob) => !ob.hidden).map((ob) => ({ ob, box: growBox(aabbScreen(ob.box), -5) }));
   const LS = 14, SS = 11.5;
+  // points along every floor link, so labels can keep clear of them
+  const linkDots = [];
+  for (const lk of sc.links) {
+    if (lk.path.arc) continue;
+    const fl = lk.path.flat;
+    for (let i = 1; i < fl.length; i++) {
+      const a = projP(fl[i - 1].p), b = projP(fl[i].p), n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 8));
+      for (let k = 0; k <= n; k++) linkDots.push([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n]);
+    }
+  }
   for (const ob of sc.objs) {
     const lines = [];
     if (ob.label) lines.push({ text: String(ob.label), size: LS, weight: 650, fill: th.text.color });
@@ -649,11 +704,12 @@ export function compile(sc) {
       if (side === 'left') return { x: sb.x0 - 10, y: (sb.y0 + sb.y1) / 2 - h / 2, anchor: 'end', box: { x0: sb.x0 - 10 - w, x1: sb.x0 - 10, y0: (sb.y0 + sb.y1) / 2 - h / 2, y1: (sb.y0 + sb.y1) / 2 + h / 2 } };
       return { x: cx, y: sb.y1 + 9, anchor: 'middle', box: { x0: cx - w / 2, x1: cx + w / 2, y0: sb.y1 + 9, y1: sb.y1 + 9 + h } };
     };
-    const clash = (b) => labelBoxes.some((l) => boxesOverlap(l, b, 1)) || solid.some((sld) => sld.ob !== ob && sld.ob !== ob.parent && sld.ob.parent !== ob && boxesOverlap(sld.box, b, 2));
+    const onLink = (b) => linkDots.some((q) => q[0] > b.x0 + 2 && q[0] < b.x1 - 2 && q[1] > b.y0 + 2 && q[1] < b.y1 - 2);
+    const clash = (b) => labelBoxes.some((l) => boxesOverlap(l, b, 1)) || solid.some((sld) => sld.ob !== ob && sld.ob !== ob.parent && sld.ob.parent !== ob && boxesOverlap(sld.box, b, 2)) || onLink(b);
     const order = ob.labelSide ? [ob.labelSide] : ['below', 'above', 'right', 'left'];
     let pos = place(order[0]);
     for (const side of order) { const p = place(side); if (!clash(p.box)) { pos = p; break; } }
-    if (clash(pos.box)) note('warn', 'label-overlap', `The label "${ob.label || ob.sub}" overlaps another label or object. Give "${ob.id}" more room, shorten the text, or set labelSide: 'above' | 'below' | 'left' | 'right'.`);
+    if (clash(pos.box)) note(onLink(pos.box) && !labelBoxes.some((l) => boxesOverlap(l, pos.box, 1)) ? 'hint' : 'warn', 'label-overlap', `The label "${ob.label || ob.sub}" overlaps another label, an object or a link. Give "${ob.id}" more room, shorten the text, or set labelSide: 'above' | 'below' | 'left' | 'right'.`);
     labelBoxes.push(pos.box);
     let y = pos.y, svg = '';
     for (const l of lines) {
@@ -723,8 +779,10 @@ export function compile(sc) {
   // ================================================================ 6. frame, captions, background
 
   if (!bounds) bounds = { x0: -100, y0: -100, x1: 100, y1: 100 };
-  const pad = o.pad;
-  let vb = growBox(bounds, pad);
+  // pad: one number, [sides, top-and-bottom], or [top, right, bottom, left]
+  const pads = Array.isArray(o.pad) ? (o.pad.length === 2 ? [o.pad[1], o.pad[0], o.pad[1], o.pad[0]] : [0, 1, 2, 3].map((i) => o.pad[i] ?? o.pad[0] ?? 56)) : [o.pad, o.pad, o.pad, o.pad];
+  const pad = Math.min(pads[1], pads[3]);
+  let vb = { x0: bounds.x0 - pads[3], y0: bounds.y0 - pads[0], x1: bounds.x1 + pads[1], y1: bounds.y1 + pads[2] };
   const cx = (vb.x0 + vb.x1) / 2;
 
   if (o.heading) {
@@ -741,6 +799,8 @@ export function compile(sc) {
     const widest = Math.max(...captions.map((c) => textWidth(c.text, 15.5, 600)));
     if (widest + pad > vb.x1 - vb.x0) { const add = (widest + pad - (vb.x1 - vb.x0)) / 2; vb.x0 -= add; vb.x1 += add; }
     captions.forEach((c, i) => {
+      const shown = (i < captions.length - 1 ? captions[i + 1].t : T - 0.55) - c.t;
+      if (shown < 1) note('warn', 'caption-rushed', `Caption "${c.text.slice(0, 40)}${c.text.length > 40 ? '…' : ''}" is on screen for only ${r1(Math.max(0, shown))}s, so it cannot be read${shown < 0.3 ? ' and will overprint the next one' : ''}. Put the steps it describes, or s.wait(1.5), between it and the next s.say().`);
       if (c.text.length > 64) note('hint', 'caption-long', `Caption "${c.text.slice(0, 40)}…" is long. Captions read best under about 60 characters.`);
       const last = i === captions.length - 1;
       const out = last ? T - 0.55 : captions[i + 1].t; // fade out as the next caption arrives
@@ -806,7 +866,7 @@ export function compile(sc) {
   const heroes = sc.objs.filter((ob) => ob.hero);
   if (vis.length >= 4 && heroes.length === 0 && !sc.objs.some((ob) => ob.opts.glow || ['accent', 'accent2'].includes(ob.opts.color))) note('hint', 'no-hero', 'No focal point. Mark the single most important object with hero: true so the eye has somewhere to land.');
   if (heroes.length > 2) note('hint', 'many-heroes', `${heroes.length} objects are marked hero. One focal point reads best; keep hero: true for the single most important object.`);
-  const hasMotion = sc.steps || sc.objs.some((ob) => ob.float) || sc.links.some((l) => l.o.flow);
+  const hasMotion = sc.steps || sc.objs.some((ob) => ob.float || ob.animated) || sc.links.some((l) => l.o.flow);
   for (const ob of sc.objs) if (ob.level < 1 && !ob.tracks.grow) note('hint', 'never-grown', `"${ob.id}" starts at level ${ob.level} but the story never raises it. Add s.grow(${ob.id}) to the story.`);
   if (!hasMotion && sc.objs.length) note('hint', 'static', 'Nothing moves yet. Add a story (s.story([...])) to show the idea happening, or flow: true on a link.');
   if (sc.objs.filter((ob) => ob.float).length > 3) note('hint', 'too-much-float', 'More than three floating objects makes the scene feel restless. Float only the hero or things that really hover.');

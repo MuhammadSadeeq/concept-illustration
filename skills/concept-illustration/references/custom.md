@@ -2,7 +2,7 @@
 
 The kit is a starting vocabulary. When the subject needs something it does not have (an oven, a syringe, a wind turbine, a product's own device), build it from the same shapes the kit is made of. A custom object gets the same lighting, shadows, labels and story steps as a built-in one.
 
-Contents: [three ways in](#three-ways-in) · [shapes](#shapes) · [artwork on faces](#artwork-on-faces) · [moving parts](#moving-parts) · [your own SVG](#your-own-svg) · [worked examples](#worked-examples) · [making it look right](#making-it-look-right)
+Contents: [three ways in](#three-ways-in) · [shapes](#shapes) · [artwork on faces](#artwork-on-faces) · [moving parts](#moving-parts) (mechanisms and vignettes) · [your own SVG](#your-own-svg) · [worked examples](#worked-examples) · [making it look right](#making-it-look-right)
 
 ## Three ways in
 
@@ -32,14 +32,15 @@ Coordinates inside a builder are in grid cells **relative to the object's own or
 
 | Shape | Call | Notes |
 | --- | --- | --- |
-| Block | `sh.box({ x, y, z, w, d, h, r, color, top, left, right })` | `w` along x, `d` along y, `h` up. `r` rounds the vertical edges. `top`, `left`, `right` take artwork |
-| Cylinder | `sh.cyl({ x, y, z, r, h, color, top })` | Stands on its end |
-| Upright slab | `sh.panel({ x, y, z, w, h, t, r, facing, color, face, outline })` | `facing: 'left'` shows its front toward the lower-left, `'right'` toward the lower-right. `t` is thickness. `outline: [[a, b], ...]` replaces the rectangle with any flat shape (a across, b up, origin at bottom centre) |
+| Block | `sh.box({ x, y, z, w, d, h, r, color, top, left, right })` | `x, y` is the centre of its footprint, `z` its underside. `w` along x, `d` along y, `h` up. `r` rounds the vertical edges. `top`, `left`, `right` take artwork |
+| Cylinder | `sh.cyl({ x, y, z, r, h, color, top })` | Stands on its end. `x, y` is its centre, `z` its base |
+| Upright slab | `sh.panel({ x, y, z, w, h, t, r, facing, color, face, outline })` | `x, y` is the centre of its bottom edge on the floor and `z` lifts it. `facing: 'left'` shows its front toward the lower-left, `'right'` toward the lower-right. `t` is thickness. `outline: [[a, b], ...]` replaces the rectangle with any flat shape (a across, b up, origin at bottom centre) |
 | Extrusion | `sh.prism({ plane, at, outline, depth, color })` | Any outline pushed out of a plane: `'top'` rises from the floor, `'left'` comes toward the lower-left, `'right'` toward the lower-right |
 | Ball | `sh.sphere({ x, y, z, r, color })` | `z` is the height of its centre |
 | Cone or taper | `sh.cone({ x, y, z, r, r2, h, color })` | `r` at the bottom, `r2` at the top (0 for a point; larger than `r` for a funnel) |
 | Faceted solid | `sh.mesh({ faces, color })` | Convex only. Each face is a list of `[x, y, z]` corners, counter-clockwise seen from outside |
 | Thin line | `sh.wire({ points, color, width, dash })` | A cable, mast or beam through `[x, y, z]` points |
+| Group | `sh.group({ parts, anim, sort })` | Shapes that move as one (`anim`), or that must be drawn in a fixed order (`sort: false`) |
 | Flat artwork | `sh.decal({ plane, at, items })` | Artwork lying on a plane anywhere in space |
 | Raw SVG | `sh.raw({ x, y, z, svg, w, h })` | Markup drawn in screen pixels around a point; not foreshortened |
 
@@ -47,7 +48,7 @@ Outline helpers for `prism` and `panel`: `sh.outline.rect(w, d, radius)`, `sh.ou
 
 `color` is a palette role (`body` `body2` `muted` `dark` `paper` `screen` `accent` `accent2` `ok` `warn` `danger` `gold`) or a hex. Prefer roles: the object then follows whatever look the scene uses. Use a hex only for something whose colour is its identity (bread, a brand device).
 
-Shapes are drawn back to front automatically. Keep them from intersecting: stack with `z`, or set them side by side.
+Every shape also takes `anim` (see [moving parts](#moving-parts)). Shapes are drawn back to front automatically. Keep them from intersecting: stack with `z`, or set them side by side.
 
 ## Artwork on faces
 
@@ -70,24 +71,65 @@ Items:
 { t: 'line', x1, y1, x2, y2, stroke, sw, dash: '0.08 0.05' }
 { t: 'poly', pts: [[x, y], ...], fill, stroke, open: true }
 { t: 'path', d: 'M0 0L1 1', fill, stroke, sw }           // SVG path data in cells
-{ t: 'text', x, y, text: 'API', size: 0.3, fill, weight: 800 }
+{ t: 'text', x, y, text: 'API', size: 0.3, fill, weight: 800 }   // x, y is the centre of the text
 { t: 'icon', name: 'lock', x, y, size: 0.5, color }       // any of the 95 icons, centred on x, y
 { t: 'g', tx, ty, rot, items: [...] }                     // a group, moved and turned
 ```
 
-Any item also takes `fillOp` (fill opacity), `op` (opacity) and `anim`.
+Any item also takes `fillOp` (fill opacity), `op` (opacity), `fade: [x1, y1, x2, y2]` (the fill fades out from the first point to the second) and `anim`.
 
 Artwork on the two side faces reads naturally. Artwork on `top` lies on the floor plane: fine for panels, vents and round marks, poor for text and diagonal symbols.
 
 ## Moving parts
 
-Give an item `anim` to make a detail live. Periods are in seconds and are adjusted so the scene still loops exactly.
+`anim` makes a part live. It goes on a piece of face artwork (an item), on a shape, or on a `sh.group` of shapes that move as one. Periods are in seconds and are adjusted so the scene still loops exactly.
+
+Details, on artwork items:
 
 | `anim` | Effect | Use for |
 | --- | --- | --- |
-| `{ type: 'blink', period: 2.4, min: 0.25, phase: 0.3 }` | Fades between full and `min` | Status lights, a glowing window, a cursor (`min: 0`) |
-| `{ type: 'spin', period: 8, dir: 1 }` on a `g` item | Turns about the group's own origin | Fans, dials, radar, wheels drawn flat |
-| `{ type: 'march', period: 1.2, len: 0.6 }` on a dashed `line` | The dashes travel | Belts, cables carrying current, loading bars |
+| `{ type: 'blink', period: 2.4, min: 0.25, phase: 0.3 }` | Fades between full and `min` | Status lights, a glowing window, a cursor (`min: 0`). Also works on a shape |
+| `{ type: 'spin', period: 8, dir: 1 }` on a `g` item | Turns about the group's own origin | Fans, dials, radar, wheels drawn flat, a sweeping beam |
+| `{ type: 'march', period: 1.2, len: 0.6 }` on a dashed `line` | The dashes travel. `len` is one dash plus one gap | Belts, cables carrying current, loading bars |
+| `{ type: 'ring', period: 2.4 }` on a `circle` | Grows and fades | Signals, ripples, a ping |
+
+Mechanisms, on shapes, groups and artwork:
+
+| `anim` | Effect |
+| --- | --- |
+| `{ type: 'move', by: [x, y, z], period: 3, hold: 0.15, ease: 'inOut', phase: 0 }` | There and back again, resting at each end. A piston, a lift, a drawer, a bobbing float |
+| `{ type: 'swing', from: -20, to: 20, period: 3 }` on a `g` item | Rocks between two angles about the group's origin. A needle, a pendulum, a lever drawn on a face |
+| `{ type: 'keys', period: 5, phase: 0, keys: [...] }` | A scripted sequence, for anything with waits, different speeds or several stops |
+
+Each key is `{ at, move, rotate, scale, opacity, ease }`. `at` runs from 0 to 1 across the period. `move` is `[x, y, z]` in cells from where the part was drawn (on a face artwork item: `[x, y]` in the face's own units). `rotate` (degrees) and `scale` apply to artwork items. `ease` shapes the journey to the *next* key: `inOut` (default), `in` (gathers speed, for something falling or leaving), `out` (settles, for something arriving), `back` (overshoots and returns), `linear` (a belt).
+
+```js
+// a lift that waits, rises with its load, holds, and returns empty
+sh.group({
+  anim: { type: 'keys', period: 6, keys: [
+    { at: 0,    move: [0, 0, 0] },
+    { at: 0.2,  move: [0, 0, 0], ease: 'inOut' },   // wait at the bottom
+    { at: 0.5,  move: [0, 0, 1.4] },                // rise
+    { at: 0.75, move: [0, 0, 1.4], ease: 'in' },    // hold at the top
+    { at: 0.95, move: [0, 0, 0] },                  // come back down
+  ] },
+  parts: [sh.box({ w: 1, d: 1, h: 0.12, color: 'accent' }), sh.box({ z: 0.12, w: 0.5, d: 0.5, h: 0.4, color: 'gold' })],
+})
+```
+
+Rules that keep a mechanism convincing:
+
+- **One clock.** Give every moving part the scene's `loop` as its `period`, and time them against each other with where their keys sit, or with `phase` (0 to 1: the same sequence, started later). A part with a different period drifts out of step.
+- **Cause first.** The part that causes a movement finishes just before the part it affects starts: the gate is open before the parcel reaches it; the seal appears as the press lands.
+- **Waits are part of the motion.** Repeat a key to hold still: two keys with the same `move` are a pause.
+- **Draw a moving part where it starts.** Shapes are put in depth order once, from where they are drawn, and a part keeps that order as it moves. So draw a part behind anything it will pass behind, and express the rest of its journey with `move`. A part that would have to pass both behind and in front of the same shape needs a different route.
+- **Parts that slide inside one another** (a ram in a sleeve, a drawer in a cabinet) cannot be ordered automatically. Put the shapes concerned in `sh.group({ sort: false, parts: [...] })` and list them back to front; they are then drawn exactly in that order.
+- **Keep parts on top of a base in one group** (`sh.group({ parts: [beltA, beltB] })`) when moving parts ride over several base shapes, so the riders are always drawn above all of them.
+- **Fading out.** An artwork item with `fill` and `fade: [x1, y1, x2, y2]` is at full strength at the first point and gone at the second: light beams, glows, shadows, speed streaks.
+- **Room to move.** The frame is cropped to the shapes at rest. If a part travels or sweeps beyond them, widen the scene's `pad`.
+- A moving part has no shadow of its own, and the object's shadow follows only its still shapes.
+
+Three finished mechanisms to study: `examples/approval-press.scene.mjs` (keyed parts, a ram in a sleeve), `examples/parcel-sorter.scene.mjs` (parts sharing one clock with `phase`, artwork that turns) and `examples/lighthouse.scene.mjs` (a fading beam that sweeps).
 
 For `spin`, put the rotating artwork in a group whose `tx`, `ty` is the centre of rotation and draw the items around `0, 0`:
 

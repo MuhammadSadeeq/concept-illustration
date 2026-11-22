@@ -80,6 +80,7 @@ Every noun is a candidate object, every verb a candidate story step, and anythin
 | A quantity that grows or shrinks | Rising bars | `recipes.growth` |
 | Progress through levels | Staircase | `recipes.steps` |
 | Before and after, with and without | Two zones side by side | `s.zone` twice |
+| One mechanism that *is* the idea (a gate, a press, a valve, a sorter) | A vignette: a single object whose parts move | [Vignettes](#vignettes) |
 | Anything else | Your own composition | the steps below |
 
 [Recipes](references/recipes.md) give a finished scene from a short config. They are starting points: a recipe returns an ordinary scene, so add scenery, zones, custom objects and extra story steps to make it this subject's picture rather than the recipe's.
@@ -90,26 +91,27 @@ A look is three independent choices. Make each one on purpose, from the subject,
 
 | Choice | Options |
 | --- | --- |
-| `look` (palette) | Dark: `aurora` `carbon` `abyss` `plum` `forest` `ember` `ocean` `noir` `blueprint` `neon` · Light: `paper` `mono` `clay` `sunset` `mint` `sand` `sky` `blossom` `lemon` `slate` `grape` |
-| `finish` | `solid` shaded with rim light · `soft` round and diffuse · `outline` ink lines · `flat` poster tones with long shadows · `neon` glowing edges |
+| `look` (palette) | Dark: `aurora` `carbon` `abyss` `plum` `forest` `ember` `ocean` `noir` `blueprint` `neon` · Light: `paper` `studio` `mono` `clay` `sunset` `mint` `sand` `sky` `blossom` `lemon` `slate` `grape` |
+| `finish` | `solid` shaded with rim light · `soft` round and diffuse · `outline` ink lines · `line` white forms in hairlines with one colour · `flat` poster tones with long shadows · `neon` glowing edges |
 | `floor` | `grid` · `dots` · `plate` (a raised slab: a diorama) · `rings` · `none` |
 
 ```js
 scene({ look: 'mint', finish: 'soft', floor: 'plate' })                    // any combination works
-scene({ palette: { bg: '#0f172a', accent: '#f97316', accent2: '#22d3ee' }, finish: 'solid' })   // brand colours
+scene({ look: 'paper', accent: '#f97316' })                               // a built-in look with the brand's accent
+scene({ palette: { bg: '#0f172a', accent: '#f97316', accent2: '#22d3ee' }, finish: 'solid' })   // a look of your own: needs bg and accent
 ```
 
 - Start from mood: `node SKILL_DIR/scripts/build.mjs --list` prints every look with the moods it suits. A health blog is not a data-centre dashboard; a children's lesson is not an investor deck.
-- Match the page: dark page → dark palette, light page → light. Brand colours → `palette` or `accent: '#hex'`.
+- Match the page: dark page → dark palette, light page → light. One brand colour → `accent: '#hex'` on a built-in look. A full brand scheme → `palette`.
 - To choose by eye, render candidates side by side: `--looks mint,sand:flat,sky:outline:plate` writes `<name>.looks.png`.
 - Vary. If you made a scene earlier in this project, do not reuse its look unless the two belong to one series. Within a series, keep one look and vary composition.
 - `background: false` sits on the page's own surface; `bg: '#ffffff'` matches a known surface colour. `title` is the accessible name and is not drawn; `heading` draws a visible title.
 
 More in [design](references/design.md).
 
-### 4. Cast 3 to 9 objects
+### 4. Cast the objects
 
-Choose the most literal object for each noun. One is the **hero**: `hero: true`, and `scale: 1.2` to `1.4` if it needs presence.
+How many depends on the job: **5 to 9** for a hero scene or explainer, **2 to 4** for a small component, **1** for a vignette. Choose the most literal object for each noun. One is the **hero**: `hero: true`, and `scale: 1.2` to `1.4` if it needs presence.
 
 | Group | Kinds |
 | --- | --- |
@@ -137,7 +139,9 @@ s.add('oven', { at: [4.5, 0], label: 'Bakery', hero: true });
 
 [Custom objects](references/custom.md) explains the shapes (`box` `cyl` `panel` `prism` `sphere` `cone` `mesh` `decal` `raw` `wire`), face artwork, and how to place any SVG.
 
-Every kind, built-in or yours, accepts: `at`, `on`, `label`, `sub`, `info` (detail text for interactive output), `hero`, `color` (a role such as `accent`, `accent2`, `ok`, `warn`, `danger`, `gold`, or a hex), `scale`, `hidden`, `level`, `float`, `labelSide`. Options and icons per kind are in [kit](references/kit.md) and `--list`.
+Every kind, built-in or yours, accepts: `at`, `on`, `label`, `sub`, `info` (detail text for interactive output), `hero`, `color` (a role such as `accent`, `accent2`, `ok`, `warn`, `danger`, `gold`, or a hex), `accent` (the colour of its details), `scale`, `hidden`, `level`, `float`, `labelSide`, `opacity` (see-through), `ghost: true` (faint, with a dashed footprint: something planned, missing or removed). Options and icons per kind are in [kit](references/kit.md) and `--list`.
+
+The accent colour belongs to the hero. Where a supporting object shows a lot of it (a `house` roof, a `truck` cab), quieten it with `accent: 'muted'`.
 
 ### 5. Compose in depth
 
@@ -181,7 +185,7 @@ Draw only links that carry meaning. One link serves both directions. Ends may be
 | `s.tint(obj, 'ok')` | New state by colour: `ok` `warn` `danger` `accent` `accent2` |
 | `s.mark(obj, 'check')` | A badge pops above it with a small burst: any icon |
 | `s.pop(obj)` · `s.show(obj)` · `s.hide(obj)` | Reveal or remove (create with `hidden: true`) |
-| `s.grow(obj)` | Rise out of the floor (create with `level: 0`) |
+| `s.grow(obj)` | Rise out of the floor. Create it with `level: 0`, which leaves it sunk out of sight. Suits flat-topped things (`bars`, `building`, `cylinder`, `cube`, `stack`); for anything else use `hidden: true` and `s.pop` |
 | `s.lift(obj, 0.5)` · `s.drop(obj)` | Raise and lower |
 | `s.say('…')` | Caption under the scene; stays until the next `say` |
 | `s.wait(1)` | Hold |
@@ -201,6 +205,7 @@ The engine adds these by itself: a contact shadow and a cast shadow per object, 
 - Put the telling detail on the hero (a custom face, an icon, a `sub` label) and leave supporting objects plain.
 - Add `info: '…'` to the objects a viewer might want explained; it becomes a hover card in the interactive output.
 - For a small component in a card or a button-sized slot use `detail: 'clean'`, 2 to 4 objects and no captions.
+- `pad` is the margin around the content in pixels: one number, or `[sides, top-and-bottom]`. Widen it when a part swings or travels outside its object.
 
 ### 9. Build, check, fix
 
@@ -229,10 +234,45 @@ The SVG animates in `<img>`, inline, in Markdown and in READMEs, and stops for p
 The best result is often something this file does not list. You are expected to go there.
 
 - **New objects.** `s.define` and `s.custom` build anything from shapes; `s.svg(markup, { at, w, h })` stands any drawing in the scene. Use them whenever the kit's nearest match would be a compromise. See [custom](references/custom.md).
-- **New motion.** Combine steps into behaviour the kit does not name: a queue that fills (`pop` hidden items as tokens arrive, `hide` them as they are taken), a machine that assembles (`grow` parts in turn), a handover (`move` an object between two places), a comparison (two zones running in parallel). Parts of your own objects can animate with `anim` (`blink`, `spin`, `march`, `ring`).
+- **New motion.** Combine steps into behaviour the kit does not name: a queue that fills (`pop` hidden items as tokens arrive, `hide` them as they are taken), a machine that assembles (`grow` parts in turn), a handover (`move` an object between two places), a comparison (two zones running in parallel). Parts of your own objects can animate with `anim`: `blink`, `spin`, `march`, `ring` for details; `move`, `swing` and keyframed `keys` for parts that slide, lift, turn and wait.
 - **Experiences, not only loops.** `--experience step` lets a reader walk through the story one caption at a time; `scroll` ties the story to the page scroll; every object with `info` answers a hover or tap. Use them for teaching, onboarding and product tours. See [delivery](references/delivery.md).
+- **Mechanisms.** When how a thing works is the idea, build the thing and let its parts act it out: see [Vignettes](#vignettes).
 - **Series.** For several related ideas, make several scenes with one look and one cast, so they read as chapters.
 - **Other tools.** If the idea is not spatial at all (a precise chart, a timeline of dates, a table), say so and use the right form instead of forcing it into isometric.
+
+### Vignettes
+
+A vignette is one object, drawn large, whose parts play the idea on a loop: a press that stamps each document (approval), a turntable that shares parcels between two lanes (routing), a lighthouse sweeping its beam (monitoring). There are no labels, links or captions; the mechanism is the explanation. It suits hero slots, feature cards and anywhere a diagram would be too much.
+
+```js
+export default ({ scene }) => {
+  const s = scene({ look: 'studio', title: 'A gate that opens for each request', loop: 4, pad: 40 });
+  const P = 4; // one clock for every moving part
+  s.custom({ at: [0, 0], parts: (sh, K) => [
+    sh.box({ w: 3.6, d: 1.6, h: 0.3, r: 0.2, color: 'body' }),                       // the track
+    sh.box({ y: -0.64, z: 0.3, w: 0.3, d: 0.2, h: 1.9, r: 0.05, color: 'body' }),    // two posts
+    sh.box({ y: 0.64, z: 0.3, w: 0.3, d: 0.2, h: 1.9, r: 0.05, color: 'body' }),
+    sh.box({ z: 2.2, w: 0.3, d: 1.48, h: 0.16, r: 0.05, color: 'body' }),            // and a beam
+    // the request: arrives, waits at the gate, passes once it is open
+    sh.box({ x: -1.4, z: 0.3, w: 0.44, d: 0.44, h: 0.32, r: 0.08, color: 'body2', anim: { type: 'keys', period: P, keys: [
+      { at: 0, move: [0, 0, 0], opacity: 0 }, { at: 0.08, move: [0.1, 0, 0], opacity: 1, ease: 'out' },
+      { at: 0.28, move: [0.95, 0, 0] }, { at: 0.5, move: [0.95, 0, 0] },
+      { at: 0.8, move: [2.7, 0, 0], opacity: 1 }, { at: 0.88, move: [2.9, 0, 0], opacity: 0 }] } }),
+    // the gate: waits for the request, lifts, holds, closes behind it
+    sh.box({ z: 0.3, w: 0.2, d: 1.04, h: 0.9, r: 0.06, color: 'accent', anim: { type: 'keys', period: P, keys: [
+      { at: 0, move: [0, 0, 0] }, { at: 0.32, move: [0, 0, 0] },
+      { at: 0.46, move: [0, 0, 0.95] }, { at: 0.78, move: [0, 0, 0.95], ease: 'in' },
+      { at: 0.92, move: [0, 0, 0] }] } }),
+  ] });
+  return s;
+};
+```
+
+- Choose a mechanism the viewer knows from the physical world, and reduce it to two to five parts.
+- One clock: give every moving part the same `period` (the scene's `loop`), and offset with `phase` or with where its keys sit. Something must visibly cause each movement.
+- Let it breathe: wait, move with weight (`ease: 'in'` to fall, `'out'` to settle, `'back'` to overshoot), hold the result, return.
+- One colour for the part that matters; everything else neutral. The `studio` look with its `line` finish was made for this; `sand`, `mint` and the dark looks work as well.
+- Study `examples/approval-press.scene.mjs`, `examples/parcel-sorter.scene.mjs` and `examples/lighthouse.scene.mjs`, and read [custom](references/custom.md#moving-parts) for every motion type.
 
 ## Quality bar
 
@@ -241,11 +281,11 @@ Before you hand it over, every line must be true:
 - The still frame alone tells the idea; motion confirms it.
 - The look was chosen for this subject and is not the one you used last time.
 - One object is clearly the most important, and the eye lands on it first.
-- 3 to 9 objects, each one needed. Every object is the right object, not the nearest available one.
+- Every object is needed (5 to 9 in a scene, 2 to 4 in a component, 1 in a vignette), and each is the right object, not the nearest available one.
 - The scene has depth: something behind, something in front, heights that differ.
 - Every label is 1 to 3 words. No two labels touch. No label sits on an object.
 - Links run straight or turn once. None passes under an object.
-- The story has a beginning, a change and a result, and the result is held before the loop restarts.
+- The story has a beginning, a change and a result, and the result is held before the loop restarts. In a vignette, every movement has a visible cause.
 - Colour means something: neutral for context, accent for the hero, `ok` / `warn` / `danger` for a state or for an actor that is itself good, risky or harmful.
 - The build report shows nothing under FIX THESE.
 

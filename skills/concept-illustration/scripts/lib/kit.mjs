@@ -1015,6 +1015,8 @@ export const SHAPES = {
   decal: ({ plane = 'top', at = [0, 0, 0], items, size = [1, 1], turn = 0 }) => ({ t: 'decal', plane, o: at, items, size, turn }),
   /** Any SVG markup standing upright at a point in space (drawn in screen pixels around that point). */
   raw: ({ x = 0, y = 0, z = 0, svg, w = 1, d = 0.2, h = 1 }) => ({ t: 'raw', at: [x, y, z], svg, box: { x0: x - w / 2, y0: y - d / 2, z0: z, x1: x + w / 2, y1: y + d / 2, z1: z + h } }),
+  /** Several shapes that move as one: sh.group({ parts: [...], anim }). */
+  group: ({ parts, anim, sort }) => ({ t: 'group', parts, anim, sort }),
   /** A thin line through points in space [[x, y, z], ...]: a cable, an antenna, a beam. */
   wire: ({ points, color, width = 1.5, dash }) => ({ t: 'line', pts: points, stroke: color, sw: width, dash }),
   outline: {

@@ -133,7 +133,14 @@ export async function renderSheet(svg, out, { frames = 8, cols, cell } = {}) {
     for (let i = 0; i < frames - 1; i++) times.push(keys[Math.round((i * (keys.length - 1)) / Math.max(1, frames - 2))]);
   } else {
     times = [0, ...keys];
-    for (let i = 1; times.length < frames && i < frames * 4; i++) { const t = (m.loop * i) / (frames * 4); if (times.every((k) => Math.abs(k - t) > m.loop / (frames * 2))) times.push(t); }
+    // fill the widest gaps first, so the extra frames spread over the whole loop
+    while (times.length < frames) {
+      const s = [...times, m.loop].sort((a, b) => a - b);
+      let gi = 0;
+      for (let i = 1; i < s.length; i++) if (s[i] - s[i - 1] > s[gi + 1] - s[gi]) gi = i - 1;
+      if (s[gi + 1] - s[gi] < 0.5) break;
+      times.push((s[gi] + s[gi + 1]) / 2);
+    }
   }
   times = [...new Set(times.map((t) => +t.toFixed(2)))].sort((a, b) => a - b);
   frames = times.length;

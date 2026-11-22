@@ -30,7 +30,7 @@ function unknown(what, value, list) {
   return new Error(`Unknown ${what} "${value}".${s ? ` Did you mean "${s}"?` : ''} Available: ${list.join(', ')}.`);
 }
 
-const COMMON_OPTS = ['at', 'on', 'z', 'scale', 'color', 'accent', 'label', 'sub', 'labelSide', 'hero', 'hidden', 'float', 'glow', 'id', 'shadow', 'badge', 'level', 'info'];
+const COMMON_OPTS = ['at', 'on', 'z', 'scale', 'color', 'accent', 'label', 'sub', 'labelSide', 'hero', 'hidden', 'float', 'glow', 'id', 'shadow', 'badge', 'level', 'info', 'opacity', 'ghost'];
 const STEP_OPTS = ['dur', 'delay', 'color', 'keep', 'as', 'count', 'stagger', 'speed', 'label', 'route', 'via', 'arc', 'ease', 'react', 'stay', 'id', 'scale'];
 const SCENE_OPTS = ['look', 'theme', 'palette', 'finish', 'floor', 'accent', 'accent2', 'bg', 'background', 'grid', 'title', 'desc', 'heading', 'subheading', 'loop', 'intro', 'pad', 'aspect', 'id', 'font', 'shadows', 'haze', 'vignette', 'detail'];
 const LINK_OPTS = ['style', 'color', 'arrow', 'flow', 'route', 'via', 'label', 'arc', 'width', 'z', 'gap', 'dim'];
@@ -51,9 +51,25 @@ function scaleParts(parts, k) {
     if (q.t === 'decal') { q.items = [{ t: 'g', scale: k, items: q.items }]; if (q.size) q.size = q.size.map((v) => v * k); }
     if (q.decals) q.decals = q.decals.map((d) => ({ ...d, o: d.o.map((v) => v * k), items: [{ t: 'g', scale: k, items: d.items }] }));
     if (q.parts) q.parts = q.parts.map(S);
+    // a moving shape travels in world cells, so its distances scale with it
+    if (q.anim && q.t !== 'decal') q.anim = { ...q.anim, ...(q.anim.by ? { by: q.anim.by.map((v) => v * k) } : {}), ...(q.anim.keys ? { keys: q.anim.keys.map((key) => (key.move ? { ...key, move: key.move.map((v) => v * k) } : key)) } : {}) };
     return q;
   };
   return parts.map(S);
+}
+
+/** Floor rectangles covered by the still, solid shapes of an object (moving parts are left out). */
+function footprints(parts, out = []) {
+  for (const p of parts) {
+    if (!p || p.anim) continue;
+    if (p.t === 'group') { footprints(p.parts, out); continue; }
+    if (!['prism', 'mesh', 'sphere', 'cone'].includes(p.t)) continue;
+    const b = primBox(p);
+    if (b.x1 - b.x0 < 0.05 || b.y1 - b.y0 < 0.05) continue;
+    out.push({ x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1 });
+  }
+  // drop any rectangle that lies inside another
+  return out.filter((r, i) => !out.some((q, j) => j !== i && q.x0 <= r.x0 + 1e-6 && q.y0 <= r.y0 + 1e-6 && q.x1 >= r.x1 - 1e-6 && q.y1 >= r.y1 - 1e-6 && (j < i || !(q.x0 === r.x0 && q.y0 === r.y0 && q.x1 === r.x1 && q.y1 === r.y1))));
 }
 
 export class Scene {
@@ -61,6 +77,12 @@ export class Scene {
     for (const k of Object.keys(opts)) if (!SCENE_OPTS.includes(k)) this._early = [...(this._early || []), { level: 'warn', code: 'option', msg: `scene(): unknown option "${k}" was ignored.${suggest(k, SCENE_OPTS) ? ` Did you mean "${suggest(k, SCENE_OPTS)}"?` : ''}` }];
     this.opts = { background: true, intro: true, pad: 56, shadows: true, ...opts };
     this.notes = this._early || [];
+    const pal = this.opts.palette;
+    if (pal && typeof pal === 'object' && !pal.bg && (pal.accent || pal.accent2)) {
+      // brand colours without a background: keep the colours and let a look supply the rest
+      this.opts = { ...this.opts, accent: this.opts.accent || pal.accent, accent2: this.opts.accent2 || pal.accent2, palette: undefined };
+      this.notes.push({ level: 'hint', code: 'palette', msg: 'palette had no bg, so its colours were applied to a built-in look. Write accent: "#hex" (and accent2) for brand colours on a look, or palette: { bg, accent } for a look of your own.' });
+    }
     let look = this.opts.look || this.opts.theme || null;
     if (!look && !this.opts.palette) {
       // No look chosen: pick one from the subject so different scenes do not all look alike.
@@ -133,6 +155,12 @@ export class Scene {
       res.d = res.d ?? Math.max(0.2, 2 * Math.max(Math.abs(bb.y0), Math.abs(bb.y1)));
       res.h = res.h ?? Math.max(0.05, bb.z1);
     }
+    if (spec.custom && !res.shadow && !res.round) {
+      // an L or T shaped object throws a shadow of that shape, not of its bounding box
+      const rects = footprints(res.parts);
+      const area = rects.reduce((t, r) => t + (r.x1 - r.x0) * (r.y1 - r.y0), 0);
+      if (rects.length > 1 && area < res.w * res.d * 0.8) res.shadow = { rects };
+    }
     const k = o.scale ?? 1;
     const parts = k === 1 ? res.parts : scaleParts(res.parts, k);
     let x = 0, y = 0, z = 0;
@@ -157,6 +185,7 @@ export class Scene {
       float: o.float ? (typeof o.float === 'object' ? o.float : {}) : null,
       label: o.label ?? null, sub: o.sub ?? null, labelSide: o.labelSide || null,
       tracks: {}, tints: [], marks: [],
+      animated: JSON.stringify(parts, (key, v) => (typeof v === 'function' ? undefined : v)).includes('"anim":{'),
     };
     Object.defineProperty(obj, 'box', { get() { return aabbShift(this.local, [this.x, this.y, this.z]); } });
     obj.top = [x, y, z + obj.h];

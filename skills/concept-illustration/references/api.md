@@ -27,10 +27,10 @@ Contents: [scene](#scene) · [looks](#looks) · [objects](#objects) · [custom o
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `look` | picked from the title | A palette name (see [looks](#looks)). `theme` is accepted as a synonym |
-| `finish` | the palette's own | `solid` `soft` `outline` `flat` `neon` |
+| `finish` | the palette's own | `solid` `soft` `outline` `line` `flat` `neon` |
 | `floor` | the palette's own | `grid` `dots` `plate` `rings` `none` |
-| `palette` | | Your own colours instead of a named look: `{ bg, accent, accent2, surface, ink }` (only `bg` and `accent` are required) |
-| `accent`, `accent2` | from the look | Hex colours that replace the look's two accents |
+| `palette` | | Your own colours instead of a named look: `{ bg, accent, accent2, surface, ink }`. `bg` and `accent` are required; a dark `bg` gives a dark look |
+| `accent`, `accent2` | from the look | Hex colours that replace the look's two accents and keep everything else. The usual way to apply one brand colour |
 | `detail` | `'rich'` | `'clean'` drops the small cues (sockets, trails, bursts, motes) for small components |
 | `haze` | from the look | `false` to turn the depth haze off, or a strength from 0 to 0.4 |
 | `title` | | Accessible name of the image. It is not drawn; use `heading` for visible text |
@@ -40,7 +40,7 @@ Contents: [scene](#scene) · [looks](#looks) · [objects](#objects) · [custom o
 | `bg` | from the look | A hex colour for a flat background, to match a known surface such as a white card |
 | `grid` | from the floor | `true`, `false`, `'lines'` or `'dots'`: overrides the floor's pattern |
 | `aspect` | natural | Pad the frame to a ratio: `'16:9'`, `'1:1'`, `'4:3'`, or a number. Adds margin only; the scene keeps its size |
-| `pad` | `56` | Margin around the content, in viewBox units |
+| `pad` | `56` | Margin around the content, in viewBox units (pixels at natural size): a number, `[sides, top-and-bottom]` or `[top, right, bottom, left]`. The frame is cropped to objects at rest, so widen it when a part swings or travels beyond its object |
 | `loop` | story length | Minimum loop length in seconds |
 | `intro` | `true` | Objects rise into place once when the image loads |
 | `shadows` | `true` | Ground shadows |
@@ -64,6 +64,7 @@ A look is a palette, a finish and a floor. Any combination is valid.
 | `blueprint` | outline / grid | plans, engineering, schematics |
 | `neon` | neon / grid | futuristic, electric |
 | `paper` | outline / dots | documentation, clarity, technical |
+| `studio` | line / none | product, minimal, precise: white forms, hairlines, one colour |
 | `mono` | outline / none | print, formal, minimal |
 | `clay` | soft / none | friendly product, calm, premium |
 | `sunset` | flat / none | optimistic, people, marketing |
@@ -75,7 +76,18 @@ A look is a palette, a finish and a floor. Any combination is valid.
 | `slate` | outline / grid | reports, operations, neutral |
 | `grape` | flat / plate | imaginative, playful tech |
 
-The first ten are dark, the rest light. With `palette: { bg, accent }` every other tone (surfaces, ink, text, shadows, state colours) is derived from those two; a dark `bg` gives a dark look.
+The first ten are dark, the rest light.
+
+| Finish | Surfaces |
+| --- | --- |
+| `solid` | Three shaded tones with a rim light. The all-round choice |
+| `soft` | Rounder, lower contrast, diffuse shadows. Friendly and premium |
+| `outline` | Shaded tones inside ink outlines. Technical and editorial |
+| `line` | Near-white surfaces drawn in hairlines; only accent-coloured parts carry colour. Minimal, for vignettes and product pages |
+| `flat` | Poster tones with long hard shadows. Bold and graphic |
+| `neon` | Dark surfaces with glowing edges. Needs a dark palette |
+
+With `palette: { bg, accent }` every other tone (surfaces, ink, text, shadows, state colours) is derived from those two; a dark `bg` gives a dark look.
 
 When neither `look` nor `palette` is given, a palette is picked from the scene's `title` so that different subjects look different, and the report asks you to choose one deliberately.
 
@@ -98,11 +110,13 @@ Options every kind accepts:
 | `accent` | Detail colour (lights, icons): a role or a hex |
 | `info` | One or two sentences about the object. Shown as a card on hover or tap in the interactive output, and stored in the SVG as `data-info` |
 | `hidden` | Start invisible; reveal with `s.pop` or `s.show` |
-| `level` | `0` to `1`: how much of the object stands above the floor at the start. `level: 0` with `s.grow` makes it rise |
+| `level` | `0` to `1`: how much of the object stands above the floor at the start; the rest is sunk out of sight. `level: 0` with `s.grow` makes it rise out of the floor. Suits flat-topped objects (`bars`, `building`, `cylinder`, `cube`, `stack`, `database`); for others use `hidden` and `s.pop` |
 | `float` | `true` or `{ amp, period }`: hover gently |
 | `glow` | `true` or a colour: light the floor under it |
 | `badge` | A number or short text shown as a chip beside the label |
 | `shadow` | `false` removes its shadow |
+| `opacity` | `0` to `1`: a see-through object. Glass, something starting up, something secondary |
+| `ghost` | `true`: drawn faint with a dashed footprint and no shadow. Something planned, missing, removed or optional |
 | `id` | Name used in the build report |
 
 Colour roles: `body` `body2` `muted` `dark` `paper` `screen` (neutrals) · `accent` `accent2` (emphasis) · `ok` `warn` `danger` (state) · `gold`.
@@ -119,6 +133,8 @@ s.svg('<circle cx="50" cy="50" r="46" fill="#f50"/>', { at: [0, 4], w: 1.2, h: 1
 ```
 
 Shapes, face artwork and part animation are described in [custom.md](custom.md). Custom kinds accept every common option and work as tokens in `s.send(a, b, { as: 'oven', scale: 0.4 })`.
+
+A builder may also return `w`, `d`, `h` (to override the measured size), `round: true` (a circular footprint) and `shadow: { w, d }`, `{ r }` or `{ soft: true }`. Without `shadow`, the shadow follows the floor outline of the object's still shapes, so an L-shaped object throws an L-shaped shadow.
 
 ## Layout helpers
 
@@ -217,6 +233,7 @@ Motion that runs independently of the story:
 
 - `float: true` on an object, or `s.float(obj, { amp: 7, period: 4 })`: a slow hover. Use on the hero or on things that really hang in the air. More than three floating objects makes a scene restless.
 - `flow: true` on a link: a continuous stream of dots.
+- `anim` on a shape or a piece of face artwork in a custom object: `blink`, `spin`, `march`, `ring`, `move`, `swing`, `keys`. See [custom.md](custom.md#moving-parts).
 - Some kinds animate by themselves: status lights on `server`, eyes on `robot`, `gear` rotation, `clock` hands, `conveyor` belt, `antenna` rings, `sun` rays, typing dots on `bubble`.
 
 Ambient periods are snapped so the whole picture repeats exactly once per loop: exported GIFs and videos loop without a jump.

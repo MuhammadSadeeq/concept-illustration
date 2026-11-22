@@ -136,6 +136,46 @@ throws('a builder must return parts', () => { const s = iso.scene({}); s.define(
   }
 }
 
+// mechanisms: parts that move, fixed draw order, fading fills, hairline finish, translucency
+{
+  const { scene } = iso;
+  const s = scene({ look: 'studio', title: 'Mechanism', loop: 4, pad: [10, 20, 30, 40] });
+  const m = s.custom({ at: [0, 0], parts: (sh, K) => [
+    sh.box({ w: 3, d: 1, h: 0.3, color: 'body' }),
+    sh.box({ y: 2, w: 1, d: 3, h: 0.3, color: 'body' }),
+    sh.group({ sort: false, parts: [
+      sh.cyl({ z: 0.3, r: 0.1, h: 1, color: 'body2', anim: { type: 'move', by: [0, 0, 0.5], period: 2 } }),
+      sh.cyl({ z: 0.3, r: 0.2, h: 0.4, color: 'body' }),
+    ] }),
+    sh.group({ anim: { type: 'keys', period: 4, keys: [{ at: 0, move: [-1, 0, 0], opacity: 0 }, { at: 0.5, move: [1, 0, 0], opacity: 1 }] }, parts: [sh.box({ z: 0.3, w: 0.4, d: 0.4, h: 0.4, color: 'accent' })] }),
+    sh.decal({ plane: 'top', at: [0, 0, 1.4], size: [0.1, 0.1], items: [{ t: 'g', anim: { type: 'swing', from: -30, to: 30, period: 2 }, items: [{ t: 'poly', pts: [[0, 0], [2, -0.4], [2, 0.4]], fill: K.hex('gold'), fade: [0, 0, 2, 0] }] }] }),
+  ] });
+  const r = s.build();
+  ok('a custom object with moving parts counts as motion', !r.notes.some((n) => n.code === 'static'));
+  ok('keyed part animation compiles', /translate\([-\d.]+px,[-\d.]+px\);opacity:0/.test(r.svg));
+  ok('fading fill makes a gradient', /<linearGradient[^>]*gradientUnits="userSpaceOnUse"[^>]*><stop offset="0" stop-color="#[0-9a-f]{6}" stop-opacity="1"\/><stop offset="1"[^>]*stop-opacity="0"/.test(r.svg));
+  ok('swing rotates', /rotate\(-30deg\)/.test(r.svg) && /rotate\(30deg\)/.test(r.svg));
+  ok('an L-shaped object throws an L-shaped shadow', !!m.res.shadow && m.res.shadow.rects.length === 2);
+  ok('line finish is the studio default', s.theme.finish === 'line');
+  const a = scene({ look: 'studio', title: 'Pad', pad: 10 }), b = scene({ look: 'studio', title: 'Pad', pad: [10, 110] });
+  for (const q of [a, b]) q.add('cube', { at: [0, 0] });
+  ok('pad takes [sides, top-and-bottom]', Math.abs((b.build().height - a.build().height) - 200) < 2 && Math.abs(b.build().width - a.build().width) < 2);
+
+  const g = scene({ look: 'paper', title: 'Ghost' });
+  g.add('cube', { at: [0, 0], label: 'Now' }); g.add('cube', { at: [3, 0], label: 'Next', ghost: true }); g.add('cube', { at: [6, 0], label: 'Glass', opacity: 0.5 });
+  const gr = g.build();
+  ok('ghost and translucent objects build', /stroke="#[0-9a-f]{6}" stroke-opacity="0.5" stroke-width="1.2" stroke-dasharray="4 4"/.test(gr.svg) && gr.svg.includes('<g opacity="0.28">') && gr.svg.includes('<g opacity="0.5">'));
+
+  const p = scene({ title: 'Brand colours only', palette: { accent: '#ff5a1f' } });
+  p.add('cube', { at: [0, 0], hero: true });
+  ok('palette without bg falls back to a look with that accent', p.theme.roles.accent.toLowerCase() === '#ff5a1f' && p.notes.some((n) => n.code === 'palette'));
+
+  const t = scene({ look: 'mint', title: 'Scaled mover' });
+  t.define('bobber', (o, sh) => ({ parts: [sh.box({ w: 1, d: 1, h: 0.2 }), sh.box({ z: 0.2, w: 0.5, d: 0.5, h: 0.5, color: 'accent', anim: { type: 'move', by: [0, 0, 1], period: 2 } })] }));
+  const big = t.add('bobber', { at: [0, 0], scale: 2 });
+  ok('moving parts scale with the object', big.parts[1].anim.by[2] === 2);
+}
+
 // every example must be well-formed XML: used as <img>, an SVG is parsed strictly
 {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-xml-'));
@@ -150,6 +190,7 @@ throws('a builder must return parts', () => { const s = iso.scene({}); s.define(
   const r = spawnSync('python3', ['-I', '-c', check, ...files], { encoding: 'utf8' });
   if (r.error) console.log('(python3 not found: XML well-formedness not checked)');
   else ok('examples are well-formed XML', r.status === 0, (r.stdout || r.stderr).slice(0, 400));
+  for (const f of files) ok(`no broken values in ${path.basename(f)}`, !/object Object|undefined|NaN/.test(fs.readFileSync(f, 'utf8')));
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 

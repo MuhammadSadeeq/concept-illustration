@@ -135,17 +135,23 @@ const DEFAULT_DUR = { pulse: 0.7, glow: 1.1, pop: 0.55, show: 0.45, hide: 0.4, l
  * Lay steps out on a timeline. A plain array is a sequence; an array nested inside it runs in
  * parallel; an array nested inside that is a sequence again.
  */
-export function schedule(steps, t0, gap, durOf, parallel = false) {
+export function schedule(steps, t0, gap, durOf, parallel = false, read = { since: -Infinity, need: 0 }) {
   let t = t0, end = t0;
   const out = [];
   for (const st of steps) {
     if (!st) continue;
-    const start = parallel ? t0 : t;
+    let start = parallel ? t0 : t;
     if (Array.isArray(st)) {
-      const sub = schedule(st, start, gap, durOf, !parallel);
+      const sub = schedule(st, start, gap, durOf, !parallel, read);
       out.push(...sub.items);
       if (parallel) end = Math.max(end, sub.end); else { t = sub.end + gap; end = sub.end; }
       continue;
+    }
+    if (st.type === 'say') {
+      // a caption stays long enough to be read before the next one replaces it
+      if (start - read.since < read.need) { start = read.since + read.need; if (!parallel) t = start; }
+      read.since = start;
+      read.need = Math.max(1.3, String(st.text || '').length * 0.042);
     }
     const dur = st.dur ?? durOf(st) ?? DEFAULT_DUR[st.type] ?? 0.5;
     const delay = st.delay || 0;
@@ -154,5 +160,5 @@ export function schedule(steps, t0, gap, durOf, parallel = false) {
     if (parallel) end = Math.max(end, fin);
     else { t = fin + (st.type === 'say' ? 0 : gap); end = fin; }
   }
-  return { items: out, end: parallel ? end : Math.max(end, t0) };
+  return { items: out, end: parallel ? end : Math.max(end, t0), read };
 }
