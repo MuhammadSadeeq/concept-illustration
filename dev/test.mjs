@@ -119,5 +119,20 @@ throws('custom palette needs bg and accent', () => iso.scene({ palette: { bg: '#
 }
 throws('a builder must return parts', () => { const s = iso.scene({}); s.define('x', () => ({})); s.add('x'); }, /parts/);
 
+// interactive page
+{
+  const { experienceHtml } = await import('../skills/concept-illustration/scripts/lib/experience.mjs');
+  const s = iso.scene({ look: 'ocean', title: 'Interactive' });
+  const a = s.add('laptop', { at: [0, 0], label: 'A', info: 'First <b>actor</b>' }), b = s.add('server', { at: [4.5, 0], label: 'B', hero: true });
+  s.link(a, b); s.story([s.say('One'), s.send(a, b), s.say('Two'), s.mark(b, 'check')]);
+  const r = s.build();
+  ok('objects carry ids, labels and info', /data-obj="laptop1" data-label="A" data-info="First &lt;b&gt;actor&lt;\/b&gt;"/.test(r.svg));
+  ok('chapters are recorded', /data-chapters="\[\{&quot;t&quot;/.test(r.svg));
+  for (const mode of ['loop', 'step', 'scroll']) {
+    const html = experienceHtml('demo', r, { mode });
+    ok(`experience page (${mode})`, html.startsWith('<!doctype html>') && html.includes(`data-mode="${mode}"`) && html.includes('IsoExperience') && html.includes('<svg') && !/src="http|href="http/.test(html));
+  }
+}
+
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

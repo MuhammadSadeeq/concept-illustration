@@ -59,11 +59,9 @@
     '.isox-card{position:absolute;left:0;top:0;z-index:2;box-sizing:border-box;width:max-content;max-width:min(264px,calc(100% - 16px));padding:9px 12px 10px;border-radius:10px;background:var(--isox-card);color:var(--isox-card-ink);box-shadow:0 8px 28px rgba(0,0,0,.28),0 1px 3px rgba(0,0,0,.22);pointer-events:none;opacity:0;visibility:hidden;transform:translateY(4px);transition:opacity .14s ease,transform .14s ease,visibility 0s .14s}',
     '.isox-card--below{transform:translateY(-4px)}',
     '.isox-card--open{opacity:1;visibility:visible;transform:none;transition-delay:0s}',
-    '.isox-card b,.isox-card span{display:block}',
-    '.isox-card b{font-weight:650}',
-    '.isox-card span{margin-top:2px;font-weight:450;opacity:.8}',
+    '.isox-card b{display:block;font-weight:650}',
+    '.isox-card span{display:block;margin-top:2px;font-weight:450;opacity:.8}',
     '.isox-card b:empty,.isox-card span:empty{display:none}',
-    '.isox-card b:empty+span{margin-top:0;opacity:1}',
     '.isox-card i{position:absolute;left:var(--isox-caret,50%);bottom:-4px;width:10px;height:10px;margin-left:-5px;border-radius:2px;background:inherit;transform:rotate(45deg)}',
     '.isox-card--below i{top:-4px;bottom:auto}',
     '.isox--scroll{height:calc(100vh + var(--isox-span,200vh))}',
@@ -77,8 +75,7 @@
   let mounted = 0;
 
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-  const prefers = (query) => typeof window.matchMedia === 'function' && window.matchMedia(query).matches;
-  const iconSvg = (d) => '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="' + d + '"/></svg>';
+  const iconSvg = (d) => '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="' + d + '"/></svg>';
 
   function make(tag, cls, attrs) {
     const node = document.createElement(tag);
@@ -93,19 +90,34 @@
     return node;
   }
 
-  // Chrome follows the scene's backdrop; a transparent scene sits on the page, so follow the page.
-  function isDark(hex) {
-    const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex || '');
-    if (!m) return prefers('(prefers-color-scheme: dark)');
-    const n = parseInt(m[1].length === 3 ? m[1].replace(/./g, '$&$&') : m[1], 16);
-    return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255 < 0.5;
+  // Classes and inline styles come off again on destroy; do not leave empty attributes behind.
+  function tidy(node) {
+    for (const name of ['class', 'style']) if (!node.getAttribute(name)) node.removeAttribute(name);
+  }
+
+  // Brightness (0-255) of an element's own background, or null when it paints none.
+  function toneOf(el) {
+    const c = (getComputedStyle(el).backgroundColor.match(/[\d.]+/g) || []).map(Number);
+    return c.length === 3 || c[3] > 0.5 ? 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2] : null;
+  }
+
+  // Chrome is light or dark to suit what is actually behind it: the scene's backdrop or, for a
+  // transparent scene, the first painted background up the tree, or else the page canvas (which
+  // follows the reader's colour scheme only on pages that opted in to it).
+  function hasDarkBackdrop(node) {
+    for (let el = node; el; el = el.parentElement) if (toneOf(el) != null) return toneOf(el) < 128;
+    const probe = node.appendChild(make('i'));
+    probe.style.backgroundColor = 'Canvas';
+    const dark = toneOf(probe) < 128;
+    probe.remove();
+    return dark;
   }
 
   function readChapters(svg, loop) {
     try {
       const list = JSON.parse(svg.dataset.chapters || '[]');
       return list.filter((c) => c && c.t >= 0 && c.t < loop).sort((a, b) => a.t - b.t);
-    } catch (e) {
+    } catch {
       return [];
     }
   }
@@ -191,17 +203,15 @@
     const chapters = readChapters(svg, loop);
     // Stepping needs something to step through, so a scene without chapters counts as one.
     const marks = chapters.length ? chapters : [{ t: 0, text: '' }];
-    const reduced = prefers('(prefers-reduced-motion: reduce)');
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const timeline = createTimeline(svg);
     const undo = [];
     const ui = { dots: [], cur: -1 };
     let playing = false;
     let stopAt = null; // timeline position at which a chapter run comes to rest
     let time = 0; // position in the loop, seconds
-    let cur = 0;
+    let cur = 0; // chapter index
     let inView = true;
-    let scrubbing = false;
-    let resumeAfterScrub = false;
     let raf = 0;
     let watcher = null;
     let closeCard = () => {};
@@ -215,7 +225,6 @@
     const stage = frame.appendChild(make('div', 'isox-stage'));
     const live = frame.appendChild(make('div', 'isox-live', { 'aria-live': 'polite' }));
     const view = svg.viewBox.baseVal;
-    const hostClasses = ['isox', 'isox--' + mode, isDark(svg.dataset.bg) ? 'isox--dark' : 'isox--light'];
     const ownsTabindex = !host.hasAttribute('tabindex');
 
     function listen(node, type, fn, o) {
@@ -227,11 +236,12 @@
       countPlayer(1);
       if (target === svg) host.appendChild(pin); else slot.insertBefore(pin, svg);
       stage.appendChild(svg);
-      host.classList.add(...hostClasses);
       svg.classList.add('isox-svg');
+      host.classList.add('isox', 'isox--' + mode);
       if (svg.dataset.bg) host.style.setProperty('--isox-bg', svg.dataset.bg);
       host.style.setProperty('--isox-ratio', view.width / view.height || 1.4);
       host.style.setProperty('--isox-span', Math.max(120, loop * SCROLL_VH_PER_SECOND) + 'vh');
+      host.classList.toggle('isox--dark', hasDarkBackdrop(frame));
       if (ownsTabindex) host.setAttribute('tabindex', '0');
       // moving the svg re-parses its style sheet, so the rule can only be lifted afterwards
       if (reduced) undo.push(liftMotionRule(svg));
@@ -241,10 +251,12 @@
       slot.insertBefore(svg, after && after.parentNode === slot ? after : null);
       pin.remove();
       svg.classList.remove('isox-svg', 'isox-dim');
+      tidy(svg);
       if (target === svg) return host.remove();
-      host.classList.remove(...hostClasses);
+      host.classList.remove('isox', 'isox--' + mode, 'isox--dark');
       ['--isox-bg', '--isox-ratio', '--isox-span'].forEach((name) => host.style.removeProperty(name));
       if (ownsTabindex) host.removeAttribute('tabindex');
+      tidy(host);
     }
 
     // ---- time
@@ -381,7 +393,7 @@
 
     function paint() {
       if (ui.scrub) {
-        if (!scrubbing) ui.scrub.value = time;
+        ui.scrub.value = time;
         ui.scrub.style.setProperty('--isox-p', ((time / loop) * 100).toFixed(2) + '%');
         ui.scrub.setAttribute('aria-valuetext', time.toFixed(1) + ' of ' + loop.toFixed(1) + ' seconds');
       }
@@ -398,50 +410,47 @@
       });
     }
 
-    function scrubTo() {
-      if (!scrubbing) resumeAfterScrub = playing;
-      scrubbing = true;
+    // Dragging the scrubber leaves the scene paused on the chosen frame.
+    function scrub() {
+      const t = +ui.scrub.value; // read first: pausing repaints the slider
       pause();
-      seek(+ui.scrub.value);
-    }
-
-    function scrubEnd() {
-      scrubbing = false;
-      if (resumeAfterScrub) play();
+      seek(t);
     }
 
     function addControls() {
       if (mode === 'scroll' && !chapters.length) return;
       const bar = frame.appendChild(make('div', 'isox-bar'));
-      const stepper = mode !== 'scroll'; // scrolling is the only control in scroll mode
-      if (stepper) {
+      const full = mode !== 'scroll'; // in scroll mode the page scroll is the control
+      if (full) {
         ui.play = bar.appendChild(button('isox-btn isox-play', 'Play', ICONS.play));
         listen(ui.play, 'click', toggle);
         listen(bar.appendChild(button('isox-btn', 'Replay', ICONS.replay)), 'click', restart);
         ui.scrub = bar.appendChild(make('input', 'isox-scrub', { type: 'range', min: 0, max: loop, step: 0.01, value: 0, 'aria-label': 'Loop position' }));
-        listen(ui.scrub, 'input', scrubTo);
-        listen(ui.scrub, 'change', scrubEnd);
+        listen(ui.scrub, 'input', scrub);
       }
       if (!chapters.length) return;
       const steps = bar.appendChild(make('div', 'isox-steps', { role: 'group', 'aria-label': 'Chapters' }));
-      if (stepper) listen(steps.appendChild(button('isox-btn', 'Previous chapter', ICONS.prev)), 'click', prev);
+      if (full) listen(steps.appendChild(button('isox-btn', 'Previous chapter', ICONS.prev)), 'click', prev);
       chapters.forEach((chapter, i) => {
         ui.dots.push(steps.appendChild(button('isox-dot', chapter.text)));
         listen(ui.dots[i], 'click', () => goto(i));
       });
-      if (stepper) listen(steps.appendChild(button('isox-btn', 'Next chapter', ICONS.next)), 'click', next);
+      if (full) listen(steps.appendChild(button('isox-btn', 'Next chapter', ICONS.next)), 'click', next);
     }
 
     function onKey(e) {
       if (e.altKey || e.ctrlKey || e.metaKey) return;
       const onSlider = e.target === ui.scrub;
       const onButton = e.target.closest('button, .isox-hot');
+      const nudge = { ArrowRight: 0.5, ArrowUp: 0.5, ArrowLeft: -0.5, ArrowDown: -0.5 }[e.key];
       let act = null;
       if (e.key === 'Escape') act = closeCard;
       else if (e.key === 'k' || e.key === 'K' || (e.key === ' ' && !onButton)) act = toggle;
-      else if (e.key === 'ArrowRight' && !onSlider) act = next;
-      else if (e.key === 'ArrowLeft' && !onSlider) act = prev;
-      else if (e.key === 'Home' && !onSlider) act = restart;
+      // left to itself the slider would creep by a single step per key press
+      else if (onSlider) act = nudge ? () => seek(time + nudge) : null;
+      else if (e.key === 'ArrowRight') act = next;
+      else if (e.key === 'ArrowLeft') act = prev;
+      else if (e.key === 'Home') act = restart;
       // in scroll mode Space keeps its usual job of paging down
       if (!act || (act === toggle && mode === 'scroll')) return;
       e.preventDefault();
@@ -450,15 +459,11 @@
 
     // ---- hotspots
 
-    // Where an object sits on the stage, from its data-box (viewBox units).
+    // Where an object sits on the stage: its data-box is in viewBox units, the card in pixels.
     function spotRect(group) {
-      const box = (group.dataset.box || '').trim().split(/[\s,]+/).map(Number);
+      const box = group.dataset.box.trim().split(/[\s,]+/).map(Number);
       const s = stage.getBoundingClientRect();
-      const r = box.length === 4 && !box.some(isNaN) && view.width ? svg.getBoundingClientRect() : null;
-      if (!r) {
-        const g = group.getBoundingClientRect();
-        return { x: g.left + g.width / 2 - s.left, top: g.top - s.top, bottom: g.bottom - s.top };
-      }
+      const r = svg.getBoundingClientRect();
       const k = Math.min(r.width / view.width, r.height / view.height);
       const ox = r.left - s.left + (r.width - view.width * k) / 2 - view.x * k;
       const oy = r.top - s.top + (r.height - view.height * k) / 2 - view.y * k;
@@ -466,11 +471,11 @@
     }
 
     function addHotspots() {
-      const spots = Array.from(svg.querySelectorAll('[data-obj]')).filter((g) => g.dataset.label || g.dataset.info);
+      const spots = Array.from(svg.querySelectorAll('[data-obj][data-box]')).filter((g) => g.dataset.label || g.dataset.info);
       if (!spots.length) return;
       const card = stage.appendChild(make('div', 'isox-card', { 'aria-hidden': 'true' }));
       const role = svg.getAttribute('role');
-      const spotOf = (node) => (node && node.closest && svg.contains(node) ? node.closest('.isox-hot') : null);
+      const spotOf = (node) => (node && node.closest ? node.closest('.isox-hot') : null);
       let open = null;
       card.innerHTML = '<b></b><span></span><i></i>';
       svg.setAttribute('role', 'group'); // an image role would hide the buttons inside it
@@ -513,24 +518,25 @@
         if (spotOf(e.target)) openCard(spotOf(e.target));
       }
 
-      listen(svg, 'pointerover', (e) => {
+      // The listeners sit on the stage: focus listeners on an svg would make it a tab stop itself.
+      listen(stage, 'pointerover', (e) => {
         const g = spotOf(e.target);
         if (g && e.pointerType === 'mouse' && isShown(g)) openCard(g);
       });
-      listen(svg, 'pointerout', (e) => {
+      listen(stage, 'pointerout', (e) => {
         const g = spotOf(e.target);
         if (g && e.pointerType === 'mouse' && spotOf(e.relatedTarget) !== g) closeCard();
       });
-      listen(svg, 'focusin', onPick);
-      listen(svg, 'click', onPick);
-      listen(svg, 'focusout', closeCard);
-      listen(svg, 'keydown', (e) => {
+      listen(stage, 'focusin', onPick);
+      listen(stage, 'click', onPick);
+      listen(stage, 'focusout', closeCard);
+      listen(stage, 'keydown', (e) => {
         const g = spotOf(e.target);
         if (!g || (e.key !== 'Enter' && e.key !== ' ')) return;
         e.preventDefault();
         if (open === g) closeCard(); else openCard(g);
       });
-      listen(document, 'pointerdown', (e) => { if (!spotOf(e.target)) closeCard(); });
+      listen(document, 'pointerdown', (e) => { if (!stage.contains(e.target) || !spotOf(e.target)) closeCard(); });
       listen(window, 'resize', closeCard);
       undo.push(() => {
         closeCard();
@@ -539,6 +545,7 @@
         for (const g of spots) {
           g.classList.remove('isox-hot');
           ['tabindex', 'role', 'aria-label'].forEach((name) => g.removeAttribute(name));
+          tidy(g);
         }
       });
     }

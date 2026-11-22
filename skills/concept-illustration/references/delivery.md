@@ -2,7 +2,7 @@
 
 How to hand over a finished scene and how it behaves once it is placed.
 
-Contents: [what the build produces](#what-the-build-produces) · [placing the SVG](#placing-the-svg) · [frameworks](#frameworks) · [controlling playback](#controlling-playback) · [light and dark](#light-and-dark) · [raster and video](#raster-and-video) · [accessibility](#accessibility) · [size and performance](#size-and-performance) · [when Node is not available](#when-node-is-not-available)
+Contents: [what the build produces](#what-the-build-produces) · [placing the SVG](#placing-the-svg) · [frameworks](#frameworks) · [controlling playback](#controlling-playback) · [interactive experiences](#interactive-experiences) · [light and dark](#light-and-dark) · [raster and video](#raster-and-video) · [accessibility](#accessibility) · [size and performance](#size-and-performance) · [when Node is not available](#when-node-is-not-available)
 
 ## What the build produces
 
@@ -10,6 +10,8 @@ Contents: [what the build produces](#what-the-build-produces) · [placing the SV
 | --- | --- |
 | `<name>.svg` | The deliverable. Self-contained: shapes, gradients and CSS animation in one file. No scripts, no external requests |
 | `<name>.html` | A preview with play, pause, scrub and backdrop controls. For checking, not for shipping |
+| `<name>.experience.html` | An interactive page (`--experience`): step-through or scroll-driven, with hover cards. Shippable |
+| `<name>.looks.png` | The scene in several looks side by side (`--looks`). For choosing |
 | `<name>.sheet.png` | Frames across the loop (`--sheet`). For checking motion |
 | `<name>.png` | A still (`--png`). A poster, a social image, a fallback |
 | `<name>.mp4` `.gif` `.webm` | One loop as video (`--mp4`, `--gif`, `--webm`) |
@@ -93,6 +95,66 @@ for (const a of svg.getAnimations({ subtree: true })) a.currentTime = (+intro + 
 `data-loop` holds the loop length and `data-intro` the length of the one-time entrance. To build without the entrance, pass `intro: false` to `scene()`.
 
 An `<img>` cannot be paused from the page. To restart one, reassign its `src`.
+
+## Interactive experiences
+
+A loop explains at its own pace. When the reader should set the pace, or explore, build the interactive page as well:
+
+```bash
+node SKILL_DIR/scripts/build.mjs cache.scene.mjs --experience step     # or loop, or scroll
+```
+
+This writes `cache.experience.html`: the SVG, a small script and its styling in one file, with nothing fetched from anywhere. The scene itself is unchanged; the script only steers the animation the SVG already carries.
+
+| Mode | Behaviour | Use it for |
+| --- | --- | --- |
+| `loop` | Plays continuously, with play, replay, a scrubber and chapter dots | A hero that visitors may want to pause or replay |
+| `step` | Plays one chapter and waits. Next and previous move between chapters | Teaching, onboarding, product tours, talks |
+| `scroll` | The scene stays pinned while the page scrolls; scrolling drives the story | Long-form articles and landing pages |
+
+What the reader gets in every mode:
+
+- **Chapters.** Each `s.say(...)` starts a chapter. Three to six chapters works best.
+- **Hover cards.** Every object with a `label` can be hovered, focused or tapped; its card shows the label and its `info` text while the other objects dim.
+- **Keyboard.** Space or K plays and pauses, the arrow keys step between chapters, Home restarts, Escape closes a card.
+- **Good manners.** It plays only while on screen and the tab is visible, and it never autoplays for people who prefer reduced motion: they start on the first chapter and step through.
+
+Writing a scene for it:
+
+```js
+const cache = s.add('server', { at: [4.5, 0], label: 'Edge cache', hero: true,
+  info: 'Keeps a copy of every page close to the visitor, so repeat requests never travel to the origin.' });
+
+s.story([
+  s.say('A visitor asks for a page'),          // chapter 1
+  s.send(user, cache),
+  s.say('The cache fetches it once'),          // chapter 2
+  s.send(cache, origin), s.send(origin, cache, { as: 'doc' }), s.tint(cache, 'ok'),
+  s.say('and answers everyone after that'),    // chapter 3
+  s.send(cache, user, { as: 'doc' }), s.mark(user, 'check'),
+  s.wait(1),
+]);
+```
+
+Give `info` to the objects a newcomer would ask about, in one or two sentences. End each chapter on something visible (a `tint`, a `mark`, a `pop`), because in `step` mode that frame is what the reader looks at while reading the caption.
+
+**Placing it on a page.** Either embed the generated page in an `<iframe>`, or enhance an inline SVG yourself: copy `SKILL_DIR/scripts/runtime/iso-experience.js` into the site, load it once, and wrap the SVG:
+
+```html
+<figure data-iso-experience data-mode="step">
+  <!-- contents of cache.svg -->
+</figure>
+<script src="/js/iso-experience.js"></script>
+```
+
+`data-controls="false"` hides the control bar and `data-hotspots="false"` turns the cards off. Several figures on one page work independently. For custom controls, mount it yourself:
+
+```js
+const player = IsoExperience.mount(document.querySelector('#cache'), { mode: 'step' });
+player.next();          // also: prev(), goto(index), play(), pause(), toggle(), seek(seconds), destroy()
+```
+
+Without the script the figure is still the plain animated SVG, so the page degrades gracefully.
 
 ## Light and dark
 

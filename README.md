@@ -117,7 +117,7 @@ Fifty objects and ninety-five icons cover a lot, and the skill tells the agent t
 - **Any object.** `s.define` builds new objects from the same shapes the kit uses (blocks, cylinders, extrusions, cones, spheres, artwork on faces, moving parts). The bakery scene above defines its own oven and loaf in twenty lines.
 - **Any drawing.** `s.svg` stands arbitrary SVG artwork in the scene.
 - **Real movement.** Objects slide, rise out of the floor, lift, appear and change state; tokens can be any object.
-- **Experiences.** `--experience step` produces an interactive page where a reader walks through the story one caption at a time; `scroll` ties it to the page scroll; objects answer a hover or tap with a detail card.
+- **Experiences.** `--experience step` produces an interactive page where a reader walks through the story one caption at a time; `scroll` ties it to the page scroll; objects answer a hover or tap with a detail card. Open [`gallery/request-lifecycle.experience.html`](gallery/request-lifecycle.experience.html) locally to try one.
 
 ## Built to work with small models
 

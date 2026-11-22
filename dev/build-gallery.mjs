@@ -51,6 +51,14 @@ for (const spec of LOOKS) {
   write('kit.svg', s.build().svg);
 }
 
+// 4. one interactive page, to open locally
+{
+  const { experienceHtml } = await import('../skills/concept-illustration/scripts/lib/experience.mjs');
+  const mod = await import(pathToFileURL(path.join(dir, 'request-lifecycle.scene.mjs')).href);
+  const r = (await mod.default({ ...iso, recipes: makeRecipes(iso.scene) })).build();
+  write('request-lifecycle.experience.html', experienceHtml('request-lifecycle', r, { mode: 'step' }));
+}
+
 if (process.argv.includes('--posters')) {
   const { renderPng } = await import('../skills/concept-illustration/scripts/render.mjs');
   for (const name of ['request-lifecycle', 'agent-loop']) {
