@@ -144,7 +144,8 @@ Fifty objects and ninety-five icons cover a lot, and the skill tells the agent t
 - **Any object.** `s.define` builds new objects from the same shapes the kit uses (blocks, cylinders, extrusions, cones, spheres, artwork on faces). The bakery scene above defines its own oven and loaf in twenty lines.
 - **Any mechanism.** Parts of an object can slide, lift, swing, orbit an axis and run keyframed sequences of their own, which is how the vignettes and the generator above are made. Streams of particles, vector arrows, ripples, gauges and changing readouts are ready-made.
 - **Any drawing.** `s.svg` stands arbitrary SVG artwork in the scene.
-- **Real movement.** Objects slide, rise out of the floor, lift, appear and change state; tokens can be any object. Objects can also be translucent, or ghosted to stand for something planned or missing.
+- **Real movement.** Objects slide, rise out of the floor, lift, appear and change state; tokens can be any object; the camera can move in on a detail and back out. Objects can also be translucent, or ghosted to stand for something planned or missing.
+- **Sets that match.** A series file holds the look, the image size and the custom objects for a whole course or product, so forty illustrations read as one work.
 - **Experiences.** `--experience step` produces an interactive page where a reader walks through the story one caption at a time; `scroll` ties it to the page scroll; objects answer a hover or tap with a detail card. Open [`gallery/request-lifecycle.experience.html`](gallery/request-lifecycle.experience.html) locally to try one.
 
 ## Built to work with small models
@@ -178,7 +179,7 @@ A small transparent component for a feature card is the same thing with `backgro
 ```
 skills/concept-illustration/
   SKILL.md            what the agent reads first
-  references/         design guide, custom objects, API, kit, recipes, delivery
+  references/         design guide, custom objects, checking, API, kit, recipes, delivery
   examples/           finished scenes, one per pattern
   scripts/            the engine (zero dependencies), build and render commands
 gallery/              built examples used in this README
@@ -192,6 +193,10 @@ npm test             # examples, every object, every look, error messages
 npm run gallery      # rebuild gallery/ from the examples
 npm run list         # print every object, icon, look, token and recipe
 ```
+
+## Versions
+
+See [CHANGELOG.md](CHANGELOG.md). To install a fixed version: `npx skills add MuhammadSadeeq/concept-illustration@v1.1.0`.
 
 ## License
 

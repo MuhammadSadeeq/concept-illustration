@@ -32,7 +32,7 @@ function unknown(what, value, list) {
 
 const COMMON_OPTS = ['at', 'on', 'z', 'scale', 'color', 'accent', 'label', 'sub', 'labelSide', 'hero', 'hidden', 'float', 'glow', 'id', 'shadow', 'badge', 'level', 'info', 'opacity', 'ghost'];
 const STEP_OPTS = ['at', 'dur', 'delay', 'color', 'keep', 'as', 'count', 'stagger', 'speed', 'label', 'route', 'via', 'arc', 'ease', 'react', 'stay', 'id', 'scale'];
-const SCENE_OPTS = ['look', 'theme', 'palette', 'finish', 'floor', 'accent', 'accent2', 'bg', 'background', 'grid', 'title', 'desc', 'heading', 'subheading', 'loop', 'intro', 'pad', 'aspect', 'size', 'id', 'font', 'shadows', 'haze', 'vignette', 'detail'];
+const SCENE_OPTS = ['series', 'look', 'theme', 'palette', 'finish', 'floor', 'accent', 'accent2', 'bg', 'background', 'grid', 'title', 'desc', 'heading', 'subheading', 'loop', 'intro', 'pad', 'aspect', 'size', 'id', 'font', 'shadows', 'haze', 'vignette', 'detail'];
 const LINK_OPTS = ['style', 'color', 'arrow', 'flow', 'route', 'via', 'label', 'arc', 'width', 'z', 'gap', 'dim'];
 
 function scaleParts(parts, k) {
@@ -75,6 +75,10 @@ function footprints(parts, out = []) {
 
 export class Scene {
   constructor(opts = {}) {
+    // series: settings and custom kinds shared by a set of related scenes; this scene's own options win
+    const series = opts.series && typeof opts.series === 'object' ? opts.series : null;
+    if (opts.series && !series) throw new Error('series must be an object of shared scene options, e.g. { look: "paper", size: [640, 480], kinds: { magnet: (o, sh, K) => ({ parts: [...] }) } }.');
+    if (series) { const { kinds: _k, ...shared } = series; const { series: _s, ...own } = opts; opts = { ...shared, ...own }; }
     for (const k of Object.keys(opts)) if (!SCENE_OPTS.includes(k)) this._early = [...(this._early || []), { level: 'warn', code: 'option', msg: `scene(): unknown option "${k}" was ignored.${suggest(k, SCENE_OPTS) ? ` Did you mean "${suggest(k, SCENE_OPTS)}"?` : ''}` }];
     this.opts = { background: true, intro: true, pad: 56, shadows: true, ...opts };
     this.notes = this._early || [];
@@ -100,6 +104,7 @@ export class Scene {
     this.texts = [];
     this.callouts = [];
     this.expects = [];
+    this._seriesKinds = series && series.kinds ? series.kinds : null;
     this.kinds = {};
     this.steps = null;
     this.storyOpts = {};
@@ -110,6 +115,7 @@ export class Scene {
       mat: (c) => material(theme, c || 'body'),
       hex: (c) => theme.roles[c] || (isHex(c) ? c : theme.roles.accent),
     };
+    if (this._seriesKinds) for (const [name, builder] of Object.entries(this._seriesKinds)) this.define(name, builder);
   }
 
   note(level, code, msg) { this.notes.push({ level, code, msg }); }
@@ -369,6 +375,18 @@ export class Scene {
     return { type: 'mark', obj: this._obj(obj, 'mark(obj, icon)'), icon, ...o };
   }
   /** Change the caption under the scene. Keep captions short. */
+  /**
+   * Move the camera in on an object or a point [x, y, z], k times closer; zoom() with nothing goes back to the whole scene.
+   * The view also returns by itself before the loop restarts.
+   */
+  zoom(target = null, k = 2, o = {}) {
+    if (target && typeof target === 'object' && !Array.isArray(target) && !target._iso) { o = target; target = null; }
+    if (typeof k === 'object' && k) { o = k; k = 2; }
+    const whole = target == null;
+    if (!whole && !Array.isArray(target)) target = this._obj(target, 'zoom(target, k)');
+    if (!whole && !(k > 0)) throw new Error('zoom(target, k): k is how many times closer, e.g. s.zoom(nucleus, 3).');
+    return { type: 'zoom', to: whole ? null : target, k: whole ? 1 : k, ...o };
+  }
   /** A caption. say('…', { at: 6 }) pins it to an absolute time on the scene clock. */
   say(text, o = {}) { return { type: 'say', text: String(text), ...(typeof o === 'number' ? { at: o } : o) }; }
   wait(sec = 0.5, o = {}) { return { type: 'wait', dur: sec, ...o }; }
@@ -392,8 +410,8 @@ export class Scene {
   build() { return compile(this); }
 }
 
-const METHODS = ['add', 'link', 'zone', 'text', 'callout', 'expect', 'row', 'grid', 'ring', 'define', 'custom', 'svg', 'float', 'story', 'send', 'move', 'pulse', 'glow', 'pop', 'show', 'hide', 'lift', 'drop', 'grow', 'tint', 'shake', 'mark', 'say', 'wait', 'build', 'toSVG'];
-const METHOD_ALIAS = { assert: 'expect', check: 'expect', verify: 'expect', connect: 'link', arrow: 'link', edge: 'link', line: 'link', object: 'add', place: 'add', put: 'add', node: 'add', group: 'zone', region: 'zone', area: 'zone', annotate: 'callout', caption: 'say', narrate: 'say', emit: 'send', flow: 'send', highlight: 'glow', reveal: 'pop', appear: 'pop', rise: 'grow', raise: 'grow', pause: 'wait', delay: 'wait', sleep: 'wait', timeline: 'story', sequence: 'story', hover: 'float', render: 'build', compile: 'build' };
+const METHODS = ['add', 'link', 'zone', 'text', 'callout', 'expect', 'zoom', 'row', 'grid', 'ring', 'define', 'custom', 'svg', 'float', 'story', 'send', 'move', 'pulse', 'glow', 'pop', 'show', 'hide', 'lift', 'drop', 'grow', 'tint', 'shake', 'mark', 'say', 'wait', 'build', 'toSVG'];
+const METHOD_ALIAS = { camera: 'zoom', focus: 'zoom', assert: 'expect', check: 'expect', verify: 'expect', connect: 'link', arrow: 'link', edge: 'link', line: 'link', object: 'add', place: 'add', put: 'add', node: 'add', group: 'zone', region: 'zone', area: 'zone', annotate: 'callout', caption: 'say', narrate: 'say', emit: 'send', flow: 'send', highlight: 'glow', reveal: 'pop', appear: 'pop', rise: 'grow', raise: 'grow', pause: 'wait', delay: 'wait', sleep: 'wait', timeline: 'story', sequence: 'story', hover: 'float', render: 'build', compile: 'build' };
 
 /** Create a scene. Calling a method that does not exist explains what to use instead. */
 export const scene = (opts) => new Proxy(new Scene(opts), {

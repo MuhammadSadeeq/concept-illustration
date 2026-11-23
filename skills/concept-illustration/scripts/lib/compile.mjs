@@ -11,7 +11,7 @@ import { buildPath, pointAt, reversePath } from './links.mjs';
 import { Track, keyframes, snapPeriod, schedule, EASE, EASE_FN } from './motion.mjs';
 import { rgba, mix } from './color.mjs';
 import { ICONS } from './icons.mjs';
-import { makeProbe } from './probe.mjs';
+import { makeProbe, findCollisions } from './probe.mjs';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
@@ -53,7 +53,7 @@ export function compile(sc) {
   // ================================================================ 1. timeline
 
   const speed = sc.storyOpts.speed ?? 3.4;
-  const movers = [], rings = [], captions = [], keyTimes = [], timeline = [];
+  const movers = [], rings = [], captions = [], keyTimes = [], timeline = [], cameraSteps = [];
   let T = o.loop ?? 6;
   const sameEnd = (a, b) => (a.obj && b.obj ? a.obj === b.obj : !a.obj && !b.obj && Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6);
   const pathFor = (st) => {
@@ -86,7 +86,7 @@ export function compile(sc) {
     T = Math.ceil(T * 10) / 10;
     for (const st of items) {
       const who = (x) => (x && x.obj ? x.obj.id : x && x._iso ? x.id : Array.isArray(x) ? `[${x.join(', ')}]` : '');
-      timeline.push({ t0: st.t0, t1: st.t1, text: st.type === 'say' ? `caption "${st.text}"` : st.type === 'send' ? `send ${who(st.from)} → ${who(st.to)}${st.as ? ` as ${st.as}` : ''}` : st.type === 'wait' ? 'wait' : `${st.type} ${who(st.obj)}${st.type === 'move' ? ` to [${st.to.join(', ')}]` : ''}` });
+      timeline.push({ t0: st.t0, t1: st.t1, text: st.type === 'say' ? `caption "${st.text}"` : st.type === 'send' ? `send ${who(st.from)} → ${who(st.to)}${st.as ? ` as ${st.as}` : ''}` : st.type === 'wait' ? 'wait' : st.type === 'zoom' ? (st.to ? `zoom in ${st.k}× on ${st.to._iso ? st.to.id : `[${st.to.join(', ')}]`}` : 'zoom back out') : `${st.type} ${who(st.obj)}${st.type === 'move' ? ` to [${st.to.join(', ')}]` : ''}` });
     }
     for (const st of items) {
       const ob = st.obj;
@@ -116,6 +116,7 @@ export function compile(sc) {
           break;
         case 'show': track(ob, 'opacity', 'opacity', ob.hidden ? 0 : 1).to(st.t0, st.t1, 1, 'smooth'); break;
         case 'hide': track(ob, 'opacity', 'opacity', ob.hidden ? 0 : 1).to(st.t0, st.t1, 0, 'smooth'); break;
+        case 'zoom': cameraSteps.push({ t0: st.t0, t1: st.t1, k: st.k, ease: st.ease || 'inOut', focus: !st.to ? null : st.to._iso ? [st.to.x, st.to.y, st.to.z + st.to.h / 2] : [st.to[0], st.to[1], st.to[2] || 0] }); keyTimes.push(st.t1 + 0.1); break;
         case 'lift': track(ob, 'lift', 'translate', [0, 0]).to(st.t0, st.t1, [0, -st.dz * UNIT], 'inOut'); break;
         case 'drop': track(ob, 'lift', 'translate', [0, 0]).to(st.t0, st.t1, [0, 0], 'inOut'); break;
         case 'tint': {
@@ -182,6 +183,10 @@ export function compile(sc) {
     }
   }
 
+  for (const hit of findCollisions(sc, T)) {
+    note('hint', 'passes-through', `${hit.a} passes through ${hit.b} at about ${r1(hit.t)} s (they overlap by ${r2(hit.depth)} cells). If they should not touch, change the timing or the path${hit.unnamed ? '; give the shapes name: "…" to see which they are in --motion' : ''}. If one is meant to slide inside the other, list both in one sh.group({ sort: false, parts: [...] }).`);
+  }
+
   // ================================================================ 2. shared helpers
 
   const sorted = [...sc.objs].sort((a, b) => a.x + a.y - (b.x + b.y));
@@ -203,6 +208,24 @@ export function compile(sc) {
   // which way a turn goes, as it appears in the picture: 'cw' clockwise, 'ccw' anticlockwise
   const turnOf = (a) => (a.sense === 'ccw' || a.sense === 'anticlockwise' ? -1 : a.sense === 'cw' || a.sense === 'clockwise' ? 1 : a.dir === -1 ? -1 : 1);
   const trackStyle = (tr) => storyStyle(tr.css(T));
+  // While the camera moves in, a label stays its own size and keeps to its anchor: it is scaled
+  // back about that point by exactly as much as the camera scales the scene.
+  const steady = (svg, ax, ay) => {
+    if (!cameraSteps.length || !svg) return svg;
+    const tr = new Track('camera', [0, 0, 1]);
+    for (const c of cameraSteps) { const q = c.focus ? 1 / c.k : 1; tr.to(c.t0, c.t1, [ax * (1 - q), ay * (1 - q), q], c.ease); }
+    tr.close(T);
+    return `<g style="${trackStyle(tr)}">${svg}</g>`;
+  };
+  // Object labels step aside while the camera is in close (the caption says what is being looked at);
+  // callouts, which name parts, stay.
+  const aside = (svg) => {
+    if (!cameraSteps.length || !svg) return svg;
+    const tr = new Track('opacity', 1);
+    for (const c of cameraSteps) tr.to(c.t0, c.t0 + Math.min(0.3, c.t1 - c.t0), c.focus && c.k > 1.15 ? 0 : 1, 'smooth');
+    tr.close(T);
+    return `<g style="${trackStyle(tr)}">${svg}</g>`;
+  };
   const join = (...list) => list.filter(Boolean).join(',').replace(/,animation:/g, ',');
 
   const smallText = [];
@@ -834,7 +857,7 @@ export function compile(sc) {
       tr.to(Math.max(until, from + 0.3), Math.max(until, from + 0.3) + 0.2, 0, 'smooth');
       one = `<g style="${trackStyle(tr)}">${one}</g>`;
     }
-    overlay += one;
+    overlay += steady(one, ax, ay);
   }
   const solid = sc.objs.filter((ob) => !ob.hidden).map((ob) => ({ ob, box: growBox(aabbScreen(ob.box), -5) }));
   const LS = 14, SS = 11.5;
@@ -855,7 +878,7 @@ export function compile(sc) {
     const callouts = ob.res.callouts || [];
     for (const c of callouts) {
       const [ax, ay] = proj(ob.x + c.at[0] * ob.k, ob.y + c.at[1] * ob.k, ob.z + c.at[2] * ob.k);
-      overlay += wrap(calloutSvg(ax, ay, c), opacityStyle(ob), hiddenAttr(ob));
+      overlay += steady(wrap(calloutSvg(ax, ay, c), opacityStyle(ob), hiddenAttr(ob)), ax, ay);
     }
     if (!lines.length) continue;
     if (String(ob.label || '').length > 24) note('hint', 'label-long', `Label "${ob.label}" is long (${String(ob.label).length} characters). Keep labels to 1–3 words and move detail into sub: or a caption.`);
@@ -890,7 +913,7 @@ export function compile(sc) {
       svg += `<circle cx="${r1(bx)}" cy="${r1(by)}" r="9.5" fill="${A}"/><text x="${r1(bx)}" y="${r1(by + 4)}" font-size="11.5" font-family="${esc(th.font)}" font-weight="800" text-anchor="middle" fill="${material(th, 'accent').on}">${esc(ob.opts.badge)}</text>`;
       pos.box.x0 -= 26;
     }
-    overlay += wrap(wrap(svg, opacityStyle(ob), hiddenAttr(ob)), ob.tracks.move ? trackStyle(ob.tracks.move) : '');
+    overlay += wrap(aside(wrap(svg, opacityStyle(ob), hiddenAttr(ob))), ob.tracks.move ? trackStyle(ob.tracks.move) : '');
     grow(pos.box);
     if (ob.tracks.move) for (const sg of ob.tracks.move.segs) grow({ x0: pos.box.x0 + sg.to[0], x1: pos.box.x1 + sg.to[0], y0: pos.box.y0 + sg.to[1], y1: pos.box.y1 + sg.to[1] });
   }
@@ -984,9 +1007,10 @@ export function compile(sc) {
     if (w / h < ar) { const add = (h * ar - w) / 2; vb.x0 -= add; vb.x1 += add; } else { const add = (w / ar - h) / 2; vb.y0 -= add; vb.y1 += add; }
   }
   vb = { x0: Math.floor(vb.x0), y0: Math.floor(vb.y0), x1: Math.ceil(vb.x1), y1: Math.ceil(vb.y1) };
+  let headingSvg = '';
   if (o.heading) {
-    overlay += `<text x="${vb.x0 + 40}" y="${vb.y0 + 58}" font-size="24" font-family="${esc(th.font)}" font-weight="750" letter-spacing="-0.3" fill="${th.text.color}">${esc(o.heading)}</text>`;
-    if (o.subheading) overlay += `<text x="${vb.x0 + 40}" y="${vb.y0 + 82}" font-size="14" font-family="${esc(th.font)}" font-weight="500" fill="${th.text.muted}">${esc(o.subheading)}</text>`;
+    headingSvg += `<text x="${vb.x0 + 40}" y="${vb.y0 + 58}" font-size="24" font-family="${esc(th.font)}" font-weight="750" letter-spacing="-0.3" fill="${th.text.color}">${esc(o.heading)}</text>`;
+    if (o.subheading) headingSvg += `<text x="${vb.x0 + 40}" y="${vb.y0 + 82}" font-size="14" font-family="${esc(th.font)}" font-weight="500" fill="${th.text.muted}">${esc(o.subheading)}</text>`;
   }
   if (smallText.length) {
     const worst = smallText.reduce((a, b) => (b.px < a.px ? b : a));
@@ -1000,13 +1024,13 @@ export function compile(sc) {
   const outW = o.size ? Math.round(o.size[0]) : W, outH = o.size ? Math.round(o.size[1]) : H;
   const mx = (bounds.x0 + bounds.x1) / 2, my = (bounds.y0 + bounds.y1) / 2;
 
-  let bg = '';
+  let bg = '', floorBg = '';
   if (o.background) {
     let fill = th.bg.from;
     if (th.bg.type === 'radial') fill = `url(#${def('bg', (id) => `<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${r1(mx)}" cy="${r1(my)}" r="${r1(Math.max(W, H) * 0.72)}"><stop offset="0" stop-color="${th.bg.from}"/><stop offset="1" stop-color="${th.bg.to}"/></radialGradient>`)})`;
     else if (th.bg.type === 'linear') fill = `url(#${def('bg', (id) => `<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${th.bg.from}"/><stop offset="1" stop-color="${th.bg.to}"/></linearGradient>`)})`;
     bg += `<rect x="${vb.x0}" y="${vb.y0}" width="${W}" height="${H}" fill="${fill}"/>`;
-    if (th.floor.spotAlpha > 0) bg += `<ellipse cx="${r1(mx)}" cy="${r1(my + (bounds.y1 - bounds.y0) * 0.12)}" rx="${r1((bounds.x1 - bounds.x0) * 0.62)}" ry="${r1((bounds.x1 - bounds.x0) * 0.62 * 0.52)}" fill="url(#${glowGrad(th.floor.spot, th.floor.spotAlpha)})"/>`;
+    if (th.floor.spotAlpha > 0) floorBg += `<ellipse cx="${r1(mx)}" cy="${r1(my + (bounds.y1 - bounds.y0) * 0.12)}" rx="${r1((bounds.x1 - bounds.x0) * 0.62)}" ry="${r1((bounds.x1 - bounds.x0) * 0.62 * 0.52)}" fill="url(#${glowGrad(th.floor.spot, th.floor.spotAlpha)})"/>`;
   }
   const gridKind = o.grid === false ? 'none' : o.grid === true ? (th.floor.grid === 'none' ? 'dots' : th.floor.grid) : typeof o.grid === 'string' ? o.grid : o.background ? th.floor.grid : 'none';
   if (gridKind !== 'none') {
@@ -1027,7 +1051,7 @@ export function compile(sc) {
     }
     const fadeR = Math.max(bounds.x1 - bounds.x0, (bounds.y1 - bounds.y0) * 1.7) * 0.62 + 120;
     const mask = def('gridmask', (id) => `<radialGradient id="${id}g" gradientUnits="userSpaceOnUse" cx="${r1(mx)}" cy="${r1(my)}" r="${r1(fadeR)}" gradientTransform="translate(0 ${r1(my * 0.42)}) scale(1 0.58)"><stop offset="0.25" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient><mask id="${id}" maskUnits="userSpaceOnUse" x="${vb.x0}" y="${vb.y0}" width="${W}" height="${H}"><rect x="${vb.x0}" y="${vb.y0}" width="${W}" height="${H}" fill="url(#${id}g)"/></mask>`);
-    bg += `<path d="${d}" fill="none" stroke="${th.floor.color}" stroke-opacity="${th.floor.alpha}" stroke-width="${gridKind === 'lines' ? 1 : 2.2}" stroke-linecap="round" mask="url(#${mask})"/>`;
+    floorBg += `<path d="${d}" fill="none" stroke="${th.floor.color}" stroke-opacity="${th.floor.alpha}" stroke-width="${gridKind === 'lines' ? 1 : 2.2}" stroke-linecap="round" mask="url(#${mask})"/>`;
   }
 
   // ================================================================ 7. lint
@@ -1059,6 +1083,21 @@ export function compile(sc) {
   const hazeSvg = o.background && o.haze !== false && th.haze > 0 && H > 320 ? `<rect x="${vb.x0}" y="${vb.y0}" width="${W}" height="${Math.round(H * 0.5)}" fill="url(#${def('haze', (id) => `<linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${th.bg.to}" stop-opacity="${typeof o.haze === 'number' ? o.haze : th.haze}"/><stop offset="1" stop-color="${th.bg.to}" stop-opacity="0"/></linearGradient>`)})" pointer-events="none"/>` : '';
   const sortedWorld = depthSort(world).map((w) => w.svg).join('');
   const fadeIn = (delay, dur = 0.5) => (o.intro ? `animation:${kf('from{opacity:0}to{opacity:1}')} ${dur}s ease-out ${r2(delay)}s both` : '');
+  // the camera: one transform over everything in the scene, leaving backdrop, heading and captions where they are
+  let cameraOpen = '';
+  if (cameraSteps.length) {
+    const cxm = vb.x0 + W / 2, cym = vb.y0 + (H - (captions.length ? 46 : 0)) / 2;
+    const cam = new Track('camera', [0, 0, 1]);
+    for (const c of cameraSteps) {
+      const f = c.focus ? projP(c.focus) : null;
+      cam.to(c.t0, c.t1, f ? [cxm - c.k * f[0], cym - c.k * f[1], c.k] : [0, 0, 1], c.ease);
+    }
+    cam.close(T);
+    // the zoomed scene stays out of the strip the captions are written in
+    const strip = captions.length ? 46 : 0;
+    const clip = strip ? def('camclip', (id) => `<clipPath id="${id}"><rect x="${vb.x0}" y="${vb.y0}" width="${W}" height="${H - strip}"/></clipPath>`) : null;
+    cameraOpen = `<g${clip ? ` clip-path="url(#${clip})"` : ''}><g style="${trackStyle(cam)}">`;
+  }
   const css = [
     ...[...kfs.entries()].map(([body, name]) => `@keyframes ${name}{${body}}`),
     `#${uid}.is-paused *{animation-play-state:paused!important}`,
@@ -1066,21 +1105,32 @@ export function compile(sc) {
   ].join('');
   const title = o.title || o.heading || 'Isometric illustration';
   const desc = o.desc || (sc.objs.filter((ob) => ob.label).length ? `Shows: ${sc.objs.filter((ob) => ob.label).map((ob) => ob.label).join(', ')}.` : '');
-  const svg = [
+  const pieces = [
     `<svg xmlns="http://www.w3.org/2000/svg" id="${uid}" viewBox="${vb.x0} ${vb.y0} ${W} ${H}" width="${outW}" height="${outH}" role="img" aria-labelledby="${uid}-t${desc ? ` ${uid}-s` : ''}" data-loop="${r2(T)}" data-intro="${introEnd}"${o.background ? ` data-bg="${th.bg.to}"` : ''}${th.dark ? ' data-dark="1"' : ''}${captions.length ? ` data-chapters="${esc(JSON.stringify(captions.map((c) => ({ t: +c.t.toFixed(2), text: c.text }))))}"` : ''}${keyTimes.length ? ` data-keys="${[...new Set([...keyTimes, T - 0.95].map((t) => Math.max(0, Math.min(T - 0.05, t)).toFixed(2)))].join(' ')}"` : ''} font-family="${esc(th.font)}">`,
     `<title id="${uid}-t">${esc(title)}</title>`, desc ? `<desc id="${uid}-s">${esc(desc)}</desc>` : '',
     `<style>${css}</style>`,
     `<defs>${[...defs.values()].map((d) => d.svg).join('')}</defs>`,
     bg ? `<g>${bg}</g>` : '',
+    cameraOpen,
+    floorBg ? `<g>${floorBg}</g>` : '',
     wrap(floor + glowLayer + shadowLayer + linkLayer + ringLayer + floorFx, fadeIn(0, 0.6)),
     `<g>${sortedWorld}</g>`,
-    hazeSvg,
     motes,
     air ? wrap(air, fadeIn(introEnd * 0.6)) : '',
     wrap(overlay, fadeIn(Math.max(0, introEnd - 0.35), 0.45)),
+    cameraOpen ? '</g></g>' : '',
+    hazeSvg,
+    headingSvg ? wrap(headingSvg, fadeIn(Math.max(0, introEnd - 0.35), 0.45)) : '',
     captionSvg ? wrap(captionSvg, fadeIn(Math.max(0, introEnd - 0.2))) : '',
     '</svg>',
-  ].join('');
+  ];
+  const svg = pieces.join('');
+  if (svg.length > 150 * 1024) {
+    // say what the size is made of, so the cure is obvious
+    const kfBytes = css.length, kfCount = (css.match(/@keyframes/g) || []).length;
+    const heavy = world.map((w) => ({ id: w.ob ? w.ob.id : '?', kb: w.svg.length / 1024 })).sort((a, b) => b.kb - a.kb).slice(0, 2).filter((w) => w.kb > 12);
+    note('hint', 'large', `The SVG is ${Math.round(svg.length / 1024)} KB; most scenes are 30 to 80. ${Math.round(kfBytes / 1024)} KB of it is ${kfCount} sets of keyframes${heavy.length ? `, and the heaviest objects are ${heavy.map((w) => `${w.id} (${Math.round(w.kb)} KB)`).join(' and ')}` : ''}. Many separately keyed dots are the usual cause: sh.stream, or flow on a link, moves any number of particles with a handful of shared keyframes.`);
+  }
 
   return { svg, width: outW, height: outH, loop: T, intro: introEnd, notes, objects: sc.objs.length, bytes: svg.length, motion: () => ({ timeline, parts: probe.report() }) };
 }

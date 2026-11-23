@@ -271,6 +271,111 @@ throws('a builder must return parts', () => { const s = iso.scene({}); s.define(
   ok('unreadable text is flagged', tiny.build().notes.some((n) => n.code === 'text-small'));
 }
 
+// camera, series, pass-through check, size hint
+{
+  const { scene } = iso;
+  const series = { look: 'paper', accent: '#2f6fed', size: [640, 480], kinds: { post: (o, sh) => ({ parts: [sh.box({ w: 0.5, d: 0.5, h: 1.2, color: o.color })] }) } };
+  const a = scene({ series, title: 'One of a set' }), b = scene({ series, title: 'Another', look: 'aurora' });
+  a.add('post', { at: [0, 0], label: 'Shared kind' }); b.add('post', { at: [0, 0] });
+  const ar = a.build(), br = b.build();
+  ok('a series shares look, size and kinds', a.look === 'paper' && ar.width === 640 && ar.height === 480 && a.theme.roles.accent.toLowerCase() === '#2f6fed' && br.width === 640);
+  ok('a scene can override its series', b.look === 'aurora');
+
+  const z = scene({ look: 'paper', title: 'Zoom', loop: 9 });
+  const p = z.add('cube', { at: [0, 0], label: 'Near' }), q = z.add('cube', { at: [4, 0], label: 'Far' });
+  z.callout([4, 0, 1.2], 'A part');
+  z.story([z.say('Whole scene', { at: 0.4 }), z.zoom(q, 2.5, { at: 3 }), z.say('Closer', { at: 3.2 }), z.zoom(null, 1, { at: 6 })]);
+  const zr = z.build();
+  ok('zoom moves a camera over the scene', /scale\(2\.5\)/.test(zr.svg) && /clip-path="url\(#[^"]+\)"><g style="animation:/.test(zr.svg) && zr.motion().timeline.some((t) => /zoom in 2.5× on cube/.test(t.text)));
+  ok('callouts keep their size under the camera', /scale\(0\.4\)/.test(zr.svg));
+  throws('zoom needs a sensible factor', () => z.zoom(p, 0), /how many times closer/);
+
+  const crash = (grouped) => {
+    const s = scene({ look: 'studio', title: 'Crossing', loop: 6 });
+    const slide = { type: 'keys', period: 6, keys: [{ at: 0, move: [0, 0, 0] }, { at: 0.5, move: [3, 0, 0] }, { at: 1, move: [0, 0, 0] }] };
+    s.custom({ at: [0, 0], parts: (sh) => {
+      const post = sh.box({ name: 'post', w: 0.4, d: 0.4, h: 1.2 }), slider = sh.box({ name: 'slider', x: -1.5, z: 0.4, w: 0.5, d: 0.3, h: 0.3, color: 'accent', anim: slide });
+      return grouped ? [sh.group({ sort: false, parts: [slider, post] })] : [post, slider];
+    } });
+    return s.build().notes;
+  };
+  ok('a part that passes through another is reported', crash(false).some((n) => n.code === 'passes-through' && /"slider" passes through "post"/.test(n.msg)));
+  ok('parts declared to slide inside one another are not', !crash(true).some((n) => n.code === 'passes-through'));
+
+  const big = scene({ look: 'paper', title: 'Heavy' });
+  big.custom({ at: [0, 0], id: 'swarm', parts: (sh) => Array.from({ length: 260 }, (_, i) => sh.sphere({ x: (i % 20) * 0.3 - 3, y: Math.floor(i / 20) * 0.3 - 2, z: 0.5, r: 0.06,
+    anim: { type: 'keys', period: 6, keys: Array.from({ length: 12 }, (_, k) => ({ at: k / 11, move: [Math.sin(i + k) * 0.3, Math.cos(i * 2 + k) * 0.3, 0] })) } })) });
+  const bn = big.build();
+  ok('a very large SVG says what it is made of', bn.bytes > 150 * 1024 && bn.notes.some((n) => n.code === 'large' && /sets of keyframes/.test(n.msg) && /swarm/.test(n.msg)), `${Math.round(bn.bytes / 1024)} KB`);
+}
+
+// in a real browser, when one is available: the interactive page, and the checker against what is drawn
+{
+  const { withPage } = await import('../skills/concept-illustration/scripts/render.mjs');
+  const { experienceHtml } = await import('../skills/concept-illustration/scripts/lib/experience.mjs');
+  const { makeProbe } = await import('../skills/concept-illustration/scripts/lib/probe.mjs');
+  const { proj } = await import('../skills/concept-illustration/scripts/lib/geom.mjs');
+  const pause = (ms) => new Promise((done) => setTimeout(done, ms));
+  let ran = null;
+  try {
+    const s = iso.scene({ look: 'ocean', title: 'Interactive' });
+    const a = s.add('laptop', { at: [0, 0], label: 'A', info: 'First actor' }), b = s.add('server', { at: [4.5, 0], label: 'B', hero: true, info: 'Second actor' });
+    s.link(a, b); s.story([s.say('One'), s.send(a, b), s.say('Two'), s.send(b, a, { as: 'doc' }), s.say('Three'), s.mark(a, 'check'), s.wait(1)]);
+    const page1 = experienceHtml('demo', s.build(), { mode: 'step' });
+
+    const m = iso.scene({ look: 'studio', title: 'Probe', loop: 6 });
+    m.custom({ at: [0, 0], parts: (sh) => [
+      sh.box({ w: 4, d: 1.2, h: 0.3 }),
+      sh.box({ name: 'gate', z: 0.3, w: 0.2, d: 1, h: 0.9, anim: { type: 'keys', period: 6, keys: [{ at: 0, move: [0, 0, 0] }, { at: 0.3, move: [0, 0, 0], ease: 'in' }, { at: 0.45, move: [0, 0, 1] }, { at: 0.8, move: [0, 0, 1], ease: 'back' }, { at: 0.95, move: [0, 0, 0] }] } }),
+      sh.box({ name: 'late', x: 1.5, z: 0.3, w: 0.3, d: 0.3, h: 0.3, anim: { type: 'move', by: [1, 0, 1], period: 6, hold: 0.1, delay: 1 } }),
+      sh.box({ name: 'early', x: -1.5, z: 0.3, w: 0.3, d: 0.3, h: 0.3, anim: { type: 'move', by: [0, 1, 0.5], period: 3, hold: 0, ease: 'sine', phase: 0.25 } }),
+    ] });
+    m.story([m.say('A caption, so there is an intro and a story', { at: 1 })]);
+    const mr = m.build(), probe = makeProbe(m, mr.loop);
+    const rest = { gate: [0, 0, 0.75], late: [1.5, 0, 0.45], early: [-1.5, 0, 0.45] };
+
+    ran = await withPage({ width: 1000, height: 760 }, 1, async (page) => {
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(String(e)));
+      await page.setContent(page1);
+      await pause(500);
+      const state = () => page.evaluate(() => ({
+        api: typeof window.IsoExperience === 'object', dots: document.querySelectorAll('.isox-dot').length,
+        on: [...document.querySelectorAll('.isox-dot')].findIndex((d) => d.classList.contains('isox-dot--on')),
+        hot: document.querySelectorAll('.isox-hot').length, card: !!document.querySelector('.isox-card--open'), text: (document.querySelector('.isox-card') || {}).textContent || '',
+      }));
+      const first = await state();
+      await page.evaluate(() => [...document.querySelectorAll('.isox-btn')].find((x) => (x.title || x.getAttribute('aria-label')) === 'Next chapter').click());
+      await pause(700);
+      const second = await state();
+      await page.evaluate(() => document.querySelector('.isox-hot').focus());
+      await pause(300);
+      const third = await state();
+
+      await page.setContent(`<html><body>${mr.svg}</body></html>`);
+      let worst = 0;
+      for (const t of [0, 0.4, 1, 1.5, 2.2, 2.7, 3.3, 4.8, 5.9]) {
+        const got = await page.evaluate(({ t, intro, loop }) => {
+          for (const an of document.getAnimations()) { an.pause(); an.currentTime = (intro + loop + t) * 1000; }
+          return [...document.querySelectorAll('g[style*="animation"]')].map((g) => { const mt = new DOMMatrix(getComputedStyle(g).transform); return [mt.e, mt.f]; });
+        }, { t, intro: mr.intro, loop: mr.loop });
+        for (const name of Object.keys(rest)) {
+          const v = probe.at(name, null, t), want = proj(v.x - rest[name][0], v.y - rest[name][1], v.z - rest[name][2]);
+          worst = Math.max(worst, Math.min(...got.map((g) => Math.hypot(g[0] - want[0], g[1] - want[1]))));
+        }
+      }
+      return { first, second, third, errors, worst };
+    });
+  } catch (e) { ran = null; console.log(`(browser checks skipped: ${String(e.message).split('\n')[0].slice(0, 120)})`); }
+  if (!ran) console.log('(no browser engine found: the interactive page and the checker-versus-browser comparison were not run)');
+  else {
+    ok('interactive page mounts with chapters and hotspots', ran.first.api && ran.first.dots === 3 && ran.first.hot === 2 && ran.errors.length === 0, JSON.stringify(ran.first) + ran.errors.join(' '));
+    ok('next chapter advances the stepper', ran.second.on === ran.first.on + 1, `${ran.first.on} -> ${ran.second.on}`);
+    ok('focusing an object opens its card', ran.third.card && /First actor/.test(ran.third.text), ran.third.text);
+    ok('the checker and the browser agree on where parts are', ran.worst < 0.05, `${ran.worst.toFixed(3)} px`);
+  }
+}
+
 // every example must be well-formed XML: used as <img>, an SVG is parsed strictly
 {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-xml-'));

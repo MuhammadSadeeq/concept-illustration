@@ -42,6 +42,7 @@ const fmt = (prop, v) => {
     case 'translate': return `transform:translate(${+v[0].toFixed(2)}px,${+v[1].toFixed(2)}px)`;
     case 'scale': return Array.isArray(v) ? `transform:scale(${+v[0].toFixed(4)},${+v[1].toFixed(4)})` : `transform:scale(${+(+v).toFixed(4)})`;
     case 'rotate': return `transform:rotate(${+(+v).toFixed(2)}deg)`;
+    case 'camera': return `transform:translate(${+v[0].toFixed(1)}px,${+v[1].toFixed(1)}px) scale(${+v[2].toFixed(3)})`;
     case 'dash': return `stroke-dashoffset:${+(+v).toFixed(2)}`;
     default: return `${prop}:${v}`;
   }
@@ -130,7 +131,7 @@ export function snapPeriod(period, T) {
 
 // ---------------------------------------------------------------- story scheduling
 
-const DEFAULT_DUR = { pulse: 0.7, glow: 1.1, pop: 0.55, show: 0.45, hide: 0.4, lift: 0.7, drop: 0.6, tint: 0.5, untint: 0.5, shake: 0.5, say: 0, wait: 0.5, flash: 0.6, grow: 0.8, move: 1, mark: 0.5, unmark: 0.3 };
+const DEFAULT_DUR = { zoom: 1.1, pulse: 0.7, glow: 1.1, pop: 0.55, show: 0.45, hide: 0.4, lift: 0.7, drop: 0.6, tint: 0.5, untint: 0.5, shake: 0.5, say: 0, wait: 0.5, flash: 0.6, grow: 0.8, move: 1, mark: 0.5, unmark: 0.3 };
 
 /**
  * Lay steps out on a timeline. A plain array is a sequence; an array nested inside it runs in

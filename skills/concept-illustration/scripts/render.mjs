@@ -113,7 +113,7 @@ function findChrome() {
   return null;
 }
 
-async function withPage(viewport, scale, fn) {
+export async function withPage(viewport, scale, fn) {
   const eng = await loadEngine();
   if (!eng) return null;
   const launchOpts = { args: ['--no-sandbox', '--force-prefers-reduced-motion=0'] };

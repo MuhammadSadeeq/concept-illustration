@@ -6,4 +6,4 @@ export { PALETTES, FINISHES, FLOORS, THEMES, THEME_NAMES, PALETTE_NAMES, FINISH_
 export { KIT, KIND_NAMES, PACKET_NAMES, SHAPES } from './lib/kit.mjs';
 export { ICON_NAMES } from './lib/icons.mjs';
 
-export const VERSION = '1.0.0';
+export const VERSION = '1.1.0';

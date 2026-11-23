@@ -116,6 +116,35 @@ Every type takes `period`, plus `delay` (seconds: the part does everything that 
 
 Each key is `{ at, move, rotate, scale, opacity, ease }`. On `keys`, `fade: true` slips the part out just before its sequence restarts and back in after, which hides the jump when the last key is not where the first one is. `at` runs from 0 to 1 across the period. `move` is `[x, y, z]` in cells from where the part was drawn (on a face artwork item: `[x, y]` in the face's own units). `move` and `opacity` work on shapes, groups and artwork items; `rotate` (degrees) and `scale` work on artwork items only. `ease` shapes the journey to the *next* key: `inOut` (default), `in` (gathers speed, for something falling or leaving), `out` (settles, for something arriving), `back` (overshoots and returns), `linear` (a belt).
 
+A complete small mechanism, a gate that opens for each request. Every part is held by something, both moving parts share one clock, and the gate is open before the request reaches it:
+
+```js
+export default ({ scene }) => {
+  const s = scene({ look: 'studio', title: 'A gate that opens for each request', loop: 4, pad: 40 });
+  const P = 4; // one clock for every moving part
+  s.custom({ at: [0, 0], parts: (sh, K) => [
+    sh.box({ w: 3.6, d: 1.6, h: 0.3, r: 0.2, color: 'body' }),                       // the track
+    sh.box({ y: -0.64, z: 0.3, w: 0.3, d: 0.2, h: 1.9, r: 0.05, color: 'body' }),    // two posts
+    sh.box({ y: 0.64, z: 0.3, w: 0.3, d: 0.2, h: 1.9, r: 0.05, color: 'body' }),
+    sh.box({ z: 2.2, w: 0.3, d: 1.48, h: 0.16, r: 0.05, color: 'body' }),            // and a beam
+    // the request: arrives, waits at the gate, passes once it is open
+    sh.box({ x: -1.4, z: 0.3, w: 0.44, d: 0.44, h: 0.32, r: 0.08, color: 'body2', anim: { type: 'keys', period: P, keys: [
+      { at: 0, move: [0, 0, 0], opacity: 0 }, { at: 0.08, move: [0.1, 0, 0], opacity: 1, ease: 'out' },
+      { at: 0.28, move: [0.95, 0, 0] }, { at: 0.5, move: [0.95, 0, 0] },
+      { at: 0.8, move: [2.7, 0, 0], opacity: 1 }, { at: 0.88, move: [2.9, 0, 0], opacity: 0 }] } }),
+    // the gate: waits for the request, lifts, holds, closes behind it
+    sh.box({ z: 0.3, w: 0.2, d: 1.04, h: 0.9, r: 0.06, color: 'accent', anim: { type: 'keys', period: P, keys: [
+      { at: 0, move: [0, 0, 0] }, { at: 0.32, move: [0, 0, 0] },
+      { at: 0.46, move: [0, 0, 0.95] }, { at: 0.78, move: [0, 0, 0.95], ease: 'in' },
+      { at: 0.92, move: [0, 0, 0] }] } }),
+  ] });
+  return s;
+};
+```
+
+
+A sequence for one part, with waits:
+
 ```js
 // a lift that waits, rises with its load, holds, and returns empty
 sh.group({
@@ -143,7 +172,7 @@ Rules that keep a mechanism convincing:
 - **One cause, many effects.** When several things follow one quantity (a current, a pressure, a load), run them all at the same `period` and set their phases from the physics: what is zero together starts together.
 - **Fading out.** An artwork item with `fill` and `fade: [x1, y1, x2, y2]` is at full strength at the first point and gone at the second: light beams, glows, shadows, speed streaks.
 - **Room to move.** The frame takes in everything a part does: slides, orbits and artwork that turns. Motion written as raw SVG is the exception; widen the scene's `pad` for that.
-- **Prove it.** Give the parts that matter a `name`, then run `--motion` to read where each is at every key moment, and state what must be true with `s.expect` (see [api](api.md#stating-facts-about-the-motion)). A direction checked by eye on a small frame is a direction not checked.
+- **Prove it.** Give the parts that matter a `name`, then run `--motion` to read where each is at every key moment, and state what must be true with `s.expect`. The build also warns when a moving part passes through another shape. [Checking](checking.md) is the procedure.
 - A moving part has no shadow of its own, and the object's shadow follows only its still shapes.
 
 Finished mechanisms to study: `examples/approval-press.scene.mjs` (keyed parts, a ram in a sleeve), `examples/parcel-sorter.scene.mjs` (parts sharing one clock with `phase`, artwork that turns), `examples/lighthouse.scene.mjs` (a fading beam that sweeps) and `examples/ac-generator.scene.mjs` (a labelled working model: a coil that turns, alternating current in the wires, a lamp and a meter in step with it).

@@ -2,7 +2,7 @@
 
 How to hand over a finished scene and how it behaves once it is placed.
 
-Contents: [what the build produces](#what-the-build-produces) · [placing the SVG](#placing-the-svg) · [frameworks](#frameworks) · [controlling playback](#controlling-playback) · [interactive experiences](#interactive-experiences) · [light and dark](#light-and-dark) · [raster and video](#raster-and-video) · [accessibility](#accessibility) · [size and performance](#size-and-performance) · [when Node is not available](#when-node-is-not-available)
+Contents: [what the build produces](#what-the-build-produces) · [placing the SVG](#placing-the-svg) · [frameworks](#frameworks) · [series](#series) · [controlling playback](#controlling-playback) · [interactive experiences](#interactive-experiences) · [light and dark](#light-and-dark) · [raster and video](#raster-and-video) · [accessibility](#accessibility) · [size and performance](#size-and-performance) · [when Node is not available](#when-node-is-not-available)
 
 ## What the build produces
 
@@ -75,6 +75,34 @@ export const CacheFigure = () => <figure dangerouslySetInnerHTML={{ __html: svg 
 **Vue / Svelte / Astro**: `<img src>` as above, or the framework's raw import (`?raw`) with `v-html` / `{@html}` / `set:html`.
 
 **Building scenes at runtime.** The engine is dependency-free ES modules and runs in the browser. Import `scripts/isokit.mjs`, build the scene in response to data or input, and assign `scene.build().svg` to an element. Use this for scenes that change with user input; for fixed illustrations ship the built SVG.
+
+## Series
+
+Several pictures for one course, product or article should look like one work. Put what they share in one file beside the scene scripts:
+
+```js
+// course.series.mjs
+export default {
+  look: 'paper', accent: '#2f6fed', size: [640, 480], pad: 40,          // any scene option
+  kinds: {                                                              // custom objects every scene can use
+    magnet: (o, sh, K) => ({ parts: [sh.box({ w: 1.4, d: 0.7, h: 1.2, color: o.pole === 'S' ? '#3d7ff0' : '#e5484d' })] }),
+  },
+};
+```
+
+```js
+// 03-field-lines.scene.mjs
+import series from './course.series.mjs';
+export default ({ scene }) => {
+  const s = scene({ series, title: 'Field lines run from north to south' });
+  s.add('magnet', { at: [0, 0], pole: 'N' });
+  return s;
+};
+```
+
+- `size` gives every picture the same shape, so pages built from them line up. Choose it once for the slot they sit in.
+- Hold the look and the cast constant; vary composition and story. A scene may still override one option (`scene({ series, floor: 'plate' })`) when it needs to.
+- Importing your own files is fine. Only the engine is not imported: the build passes it in.
 
 ## Controlling playback
 

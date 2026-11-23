@@ -41,6 +41,7 @@ Contents: [scene](#scene) · [looks](#looks) · [objects](#objects) · [custom o
 | `grid` | from the floor | `true`, `false`, `'lines'` or `'dots'`: overrides the floor's pattern |
 | `aspect` | natural | Pad the frame to a ratio: `'16:9'`, `'1:1'`, `'4:3'`, or a number. Adds margin only; the scene keeps its size |
 | `pad` | `56` | Margin around the content, in viewBox units (pixels at natural size): a number, `[sides, top-and-bottom]` or `[top, right, bottom, left]`. The frame covers every object over its whole motion (parts that slide, orbit and spin included) |
+| `series` | | An object of options shared by a set of scenes, with optional `kinds: { name: builder }` registered for you. This scene's own options win. See [delivery](delivery.md#series) |
 | `size` | from content | `[width, height]` in pixels: the image keeps exactly this size however the content changes, and the scene is fitted inside it. Use it wherever the image sits in a fixed slot on a page |
 | `loop` | story length | Minimum loop length in seconds |
 | `intro` | `true` | Objects rise into place once when the image loads |
@@ -209,6 +210,7 @@ Every step also takes `at: seconds`: it then starts at that moment on the scene 
 | Step | Options | What it shows |
 | --- | --- | --- |
 | `s.send(a, b, o)` | `as` token, `color`, `label`, `count`, `stagger`, `speed`, `arc`, `route`, `via`, `stay`, `id`, `scale`, `react: false` | A token travels a to b. It follows the link between them (in either direction); with no link it crosses open floor and the report says so. `label` is a word that rides above the token once it has left the sender. The receiver gives a small bounce on arrival |
+| `s.zoom(target, k, o)` | `ease` | The camera moves in `k` times closer on an object or a point `[x, y, z]`. `s.zoom()` returns to the whole scene, and the view also returns by itself before the loop restarts. The backdrop, heading and captions stay put; object labels step aside while the camera is in close, and callouts keep their size |
 | `s.pulse(obj, o)` | `color` | Ripple on the floor and a bounce |
 | `s.glow(obj, o)` | `color`, `keep: true` | Floor light fades in, holds, fades out (or stays with `keep`) |
 | `s.tint(obj, color)` | | Cross-fade to another colour until the loop restarts |
@@ -303,4 +305,4 @@ s.expect(1.5, (at) => Math.abs(at('needle').angle) < 5, 'the needle is centred w
 
 `at(ref, part)` returns `{ x, y, z, opacity, angle }` at that time: `x, y, z` in cells (the centre of the shape, or the origin of an object), `angle` in degrees for artwork that turns. `ref` is an object handle, an object id, or the `name` given to a shape, group or artwork item; pass an object and a name when two objects have parts with the same name. The build evaluates the same easing and timing the browser will, and lists any expectation that is false under FIX THESE, with the values it found. Tokens sent with `s.send` are not addressable.
 
-The report is produced from the scene's geometry: objects that intersect, links that run under objects or kink, labels that collide, hidden objects never revealed, crowding, missing focal point, missing motion, extreme proportions and over-long loops. It does not judge whether the picture makes its point, and it does not inspect every frame of the animation. Use the sheet or the preview for that.
+The report is produced from the scene's geometry and timing: objects that intersect, links that run under objects or kink, labels that collide, hidden objects never revealed, crowding, missing focal point, missing motion, extreme proportions and over-long loops, moving parts that pass through other shapes, text too small to read, unusually large files, and any `s.expect` that is false. [Checking](checking.md) lists them and gives the procedure. It does not judge whether the picture makes its point, and it does not inspect every frame of the animation. Use the sheet or the preview for that.

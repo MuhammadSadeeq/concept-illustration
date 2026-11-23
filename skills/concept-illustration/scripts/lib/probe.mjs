@@ -200,3 +200,58 @@ export function makeProbe(sc, T) {
 
   return { at, report, fmt, names: () => entries.filter((e) => e.named).map((e) => e.label) };
 }
+
+/**
+ * Does a moving part pass through another shape at some moment of the loop?
+ * Boxes are compared at many moments, so this catches the head that rests on the hub or the parcel
+ * that goes through the gate, which no single still frame shows.
+ */
+export function findCollisions(sc, T) {
+  const SOLID = ['prism', 'mesh', 'sphere', 'cone'], MOVES = ['move', 'keys', 'orbit'];
+  const solids = [];
+  const walk = (ob, parts, chain, fixedOrder) => parts.forEach((p) => {
+    if (!p) return;
+    const here = [...chain, p];
+    if (p.t === 'group') { walk(ob, p.parts, here, p.sort === false ? p : fixedOrder); return; }
+    if (!SOLID.includes(p.t) || (p.opacity != null && p.opacity < 0.2)) return;
+    const all = here.map((n) => n.anim).filter(Boolean);
+    const named = [...here].reverse().find((n) => n.name);
+    solids.push({ ob, box: primBox(p), all, moves: all.filter((a) => MOVES.includes(a.type)), fixedOrder, name: named ? named.name : null, kind: p.t === 'prism' ? 'shape' : p.t });
+  });
+  for (const ob of sc.objs) if (!ob.hidden && !ob.opts.ghost && !(ob.opts.opacity < 0.2)) walk(ob, ob.parts, [], null);
+  const movers = solids.filter((q) => q.moves.length);
+  if (!movers.length) return [];
+  const N = Math.min(240, Math.max(24, Math.ceil(T / 0.05))), TOL = 0.06;
+  const stateOf = (q) => q.state || (q.state = Array.from({ length: N }, (_, k) => {
+    const t = (k / N) * T, m = [q.ob.x, q.ob.y, q.ob.z];
+    let op = 1;
+    for (const a of q.all) { const r = animAt(a, t, T); for (let i = 0; i < 3; i++) m[i] += r.move[i]; op *= r.opacity; }
+    return { m, op };
+  }));
+  const together = (a, b) => a.moves.length === b.moves.length && a.moves.every((x, i) => x === b.moves[i]);
+  const found = [];
+  solids.forEach((q, i) => { q.i = i; });
+  for (const a of movers) {
+    for (const b of solids) {
+      if (a === b || (b.moves.length && b.i < a.i) || together(a, b)) continue;
+      if (a.fixedOrder && a.fixedOrder === b.fixedOrder) continue; // declared to slide inside one another
+      const sa = stateOf(a), sb = stateOf(b);
+      let seen = 0, hits = 0, first = null, deepest = 0;
+      for (let k = 0; k < N; k++) {
+        if (sa[k].op < 0.15 || sb[k].op < 0.15) continue;
+        seen++;
+        const A = a.box, B = b.box, ma = sa[k].m, mb = sb[k].m;
+        const pen = Math.min(
+          Math.min(A.x1 + ma[0], B.x1 + mb[0]) - Math.max(A.x0 + ma[0], B.x0 + mb[0]),
+          Math.min(A.y1 + ma[1], B.y1 + mb[1]) - Math.max(A.y0 + ma[1], B.y0 + mb[1]),
+          Math.min(A.z1 + ma[2], B.z1 + mb[2]) - Math.max(A.z0 + ma[2], B.z0 + mb[2]),
+        );
+        if (pen > TOL) { hits++; if (first == null) first = (k / N) * T; deepest = Math.max(deepest, pen); }
+      }
+      // parts that overlap all the time were built that way; parts that overlap for a while are passing through
+      if (hits && hits < seen * 0.9) found.push({ a, b, t: first, depth: deepest, share: hits / Math.max(1, seen) });
+    }
+  }
+  const call = (q) => (q.name ? `"${q.name}"` : `an unnamed ${q.kind} of ${q.ob.id}`);
+  return found.sort((x, y) => y.depth - x.depth).slice(0, 3).map((f) => ({ a: call(f.a), b: call(f.b), t: f.t, depth: f.depth, unnamed: !f.a.name || !f.b.name }));
+}
