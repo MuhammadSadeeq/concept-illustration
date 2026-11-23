@@ -169,14 +169,14 @@ The accent colour belongs to the hero. Where a supporting object shows a lot of 
 s.link(a, b)                                  // solid line, arrowhead at b, a small socket at a
 s.link(a, b, { style: 'dashed' })             // 'line' | 'dashed' | 'dotted' | 'pipe' | 'road'
 s.link(a, b, { arrow: 'both' })               // true | 'both' | false
-s.link(a, b, { flow: true })                  // dots stream along it forever ('alternate': they rock to and fro)
+s.link(a, b, { flow: true })                  // dots stream from a to b forever ('alternate': they rock to and fro)
 s.link(a, b, { flow: { reverse: true, jitter: 0.07, speed: 0.6 } })   // from b to a, jostling, slowly
 s.link(a, b, { route: 'straight' })           // 'auto' | 'x' | 'y' | 'straight'   (or via: [[x, y], ...])
 s.link(a, b, { arc: true })                   // a hop through the air
 s.link(a, b, { label: 'HTTPS', dim: true })   // small caption; dim fades a secondary link
 ```
 
-Draw only links that carry meaning. One link serves both directions. Ends may be points `[x, y]`.
+Draw only links that carry meaning. One link serves both directions. Ends may be points `[x, y]`. For a wire or pipe, where the arrowhead would claim a direction, use `arrow: false`.
 
 **Things that are not objects** (arrows, guides, field lines, particles in the air) are drawn with `s.draw`. They take up no room: nothing avoids them and they are never reported as overlapping, so they can run round and between the objects.
 

@@ -380,6 +380,22 @@ throws('a builder must return parts', () => { const s = iso.scene({}); s.define(
   ok('hidden objects still build', /Door/.test(hs));
 }
 
+// parts by name, and callouts that land on things
+{
+  const { scene } = iso;
+  const s = scene({ look: 'paper', title: 'Named' });
+  const bat = s.custom({ at: [2, 1], id: 'bat', scale: 2, parts: (sh) => [sh.box({ w: 1, d: 0.5, h: 0.4 }), sh.cyl({ name: 'neg', x: -0.3, z: 0.4, r: 0.08, h: 0.2 })] });
+  const pt = s.point(bat, 'neg');
+  ok('point gives the top of a named shape, scaled and placed', Math.abs(pt[0] - 1.4) < 1e-6 && Math.abs(pt[1] - 1) < 1e-6 && Math.abs(pt[2] - 1.2) < 1e-6, JSON.stringify(pt));
+  throws('point names what exists', () => s.point(bat, 'pos'), /Its named shapes: neg/);
+  const other = s.add('cube', { at: [6, 1], label: 'Other' });
+  s.callout(s.point(bat, 'neg'), 'Negative terminal');
+  s.callout([6, 1, 0.5], 'On it', { side: 'left', length: 14 });
+  s.callout([4.6, 1, 0.5], 'Lands on the cube', { length: 16 });
+  const notes = s.build().notes.filter((n) => n.code === 'callout-overlap');
+  ok('a callout on another object is reported, one about its own object is not', notes.length === 1 && /Lands on the cube/.test(notes[0].msg), notes.map((n) => n.msg.slice(0, 50)).join('|'));
+}
+
 // in a real browser, when one is available: the interactive page, and the checker against what is drawn
 {
   const { withPage } = await import('../skills/concept-illustration/scripts/render.mjs');

@@ -852,6 +852,7 @@ export function compile(sc) {
 
   const halo = o.background ? ` stroke="${th.text.halo}" stroke-opacity="${th.dark ? 0.7 : 0.9}" stroke-width="${th.dark ? 3.2 : 4}" stroke-linejoin="round" paint-order="stroke"` : '';
   const labelBoxes = [];
+  const calloutBoxes = [];
   const calloutSvg = (ax, ay, c) => {
     const left = c.side === 'left';
     const dir = left ? -1 : 1;
@@ -869,6 +870,7 @@ export function compile(sc) {
     grow(box);
     grow({ x0: ax - 4, x1: ax + 4, y0: ay - 4, y1: ay + 4 });
     labelBoxes.push(box);
+    calloutBoxes.push({ text: c.text, box, ax, ay, timed: c.from != null || c.until != null });
     return svg;
   };
   for (const c of sc.callouts) {
@@ -1092,6 +1094,14 @@ export function compile(sc) {
   }
   if (vis.length > 16) note('warn', 'crowded', `${vis.length} objects is a lot for one picture. The clearest scenes use 3–9 objects; cut supporting detail or split the idea into two scenes.`);
   else if (vis.length > 11) note('hint', 'crowded', `${vis.length} objects: check that each one is needed to explain the idea.`);
+  // a callout's words should sit on clear background, not on an object or on another callout
+  calloutBoxes.forEach((c, i) => {
+    const tight = growBox(c.box, -3);
+    // the object a callout points into is the one it is about; only other objects count
+    const onObj = vis.find((ob) => { const sb = aabbScreen(ob.box); return !(c.ax >= sb.x0 - 6 && c.ax <= sb.x1 + 6 && c.ay >= sb.y0 - 6 && c.ay <= sb.y1 + 6) && boxesOverlap(tight, growBox(sb, -6)); });
+    const onOther = calloutBoxes.find((d, j) => j < i && !(c.timed && d.timed) && boxesOverlap(tight, growBox(d.box, -3)));
+    if (onObj || onOther) note('hint', 'callout-overlap', `The callout "${c.text}" sits on ${onObj ? `"${onObj.id}"` : `the callout "${onOther.text}"`}. Move its words onto clear background with side: 'left' | 'right', rise (pixels up, negative for down) and length.`);
+  });
   const heroes = sc.objs.filter((ob) => ob.hero);
   if (vis.length >= 4 && heroes.length === 0 && !sc.objs.some((ob) => ob.opts.glow || ['accent', 'accent2'].includes(ob.opts.color))) note('hint', 'no-hero', 'No focal point. Mark the single most important object with hero: true so the eye has somewhere to land.');
   if (heroes.length > 2) note('hint', 'many-heroes', `${heroes.length} objects are marked hero. One focal point reads best; keep hero: true for the single most important object.`);

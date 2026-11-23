@@ -6,12 +6,13 @@ Contents: [what the build finds by itself](#what-the-build-finds-by-itself) · [
 
 ## What the build finds by itself
 
-Every build prints a report. **FIX THESE** are defects; **CONSIDER** are judgement calls.
+Every build prints a report. **FIX THESE** are defects; **CONSIDER** are judgement calls. A report is clean when it ends `No problems found by the checker.`; one with only CONSIDER items is acceptable when you have a reason for each.
 
 | It finds | Code |
 | --- | --- |
 | Objects that intersect, links that run under objects or kink, labels that collide | `overlap` `link-through` `kink` `label-overlap` |
 | Crowding, no focal point, nothing moving, hidden things never shown | `crowded` `no-hero` `static` `never-shown` |
+| A callout whose words sit on an object or on another callout | `callout-overlap` |
 | Captions too short to read or too long | `caption-rushed` `caption-long` |
 | A moving part that passes through another shape at some moment of the loop | `passes-through` |
 | An object moved with `s.move` that ends up in front of something it is drawn behind, or the reverse | `move-depth` |
@@ -79,6 +80,8 @@ s.expect(2.7, (at) => at('gate').z - at('parcel').z > 0.9, 'the gate is clear of
 ```
 ✗ [expect] Not true at 1 s: the parcel has passed the gate by 1 s. Found: parcel at (-0.65, 0, 0.45).
 ```
+
+A flow on a link and the particles of a stream cannot be addressed; read their direction in the `Links with a flow` and `Parts that move` sections of `--motion`, and look at them with `--trails`.
 
 Good facts to state: which side of something a thing is on at a moment; that two parts never meet; that a part has arrived before the caption that describes it; the sense of a rotation.
 

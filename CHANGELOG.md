@@ -2,7 +2,7 @@
 
 ## 1.1.0 — 2026-11-23
 
-Prompted by a review of 49 animations made with the skill, and by three further rounds of testing with a small model.
+Prompted by a review of 49 animations made with the skill, and by further rounds of testing with a small model.
 
 ### Changed (may affect scenes you already have)
 
@@ -18,6 +18,7 @@ Prompted by a review of 49 animations made with the skill, and by three further 
 - Camera: `s.zoom(target, k, { hold })` moves in on an object or point and back out.
 - `s.draw(shapes)`: shapes that are not objects (arrows, guides, particle paths) and so are never in anything's way. Link flows take `reverse`, `jitter` and `r`.
 - A report item when an object moved with `s.move` ends up on the wrong side of the drawing order, and when a story overruns the `loop` asked for.
+- `s.point(obj, 'name')` gives the position of a named shape, to aim a callout or end a link at a part. A hint when a callout's words sit on another object or callout.
 - Series: `scene({ series })` shares a look, a size and custom kinds across a set of scenes.
 - Components: `sh.stream` (many particles on a path: drift, alternate with an optional travelling wave, zigzag), `sh.arrow`, `sh.ripple`, `bar` and `readout` artwork, a `show` animation, `fade` on keyed parts. Artwork colours accept palette roles.
 - Framing: `size: [w, h]` fixes the image size; the build prints the `<img>` tag.

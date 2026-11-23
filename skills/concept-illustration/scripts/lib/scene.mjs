@@ -223,6 +223,22 @@ export class Scene {
   }
 
   /**
+   * Where a named shape of an object is, in scene cells: [x, y, z] at the top of the shape (or its 'centre').
+   * Use it to aim a callout or end a link at a part: s.callout(s.point(battery, 'neg'), 'Negative terminal').
+   */
+  point(obj, name, where = 'top') {
+    const ob = this._obj(obj, 'point(obj, name)');
+    const find = (parts) => { for (const p of parts) { if (!p) continue; if (p.name === name) return p; if (p.t === 'group') { const hit = find(p.parts); if (hit) return hit; } } return null; };
+    const part = find(ob.parts);
+    if (!part) {
+      const names = []; const walk = (parts) => parts.forEach((p) => { if (p && p.name) names.push(p.name); if (p && p.t === 'group') walk(p.parts); }); walk(ob.parts);
+      throw new Error(`point(obj, "${name}"): ${ob.id} has no shape with that name. ${names.length ? `Its named shapes: ${names.join(', ')}.` : 'Give a shape name: "…" in the builder to refer to it.'}`);
+    }
+    const b = primBox(part);
+    return [+(ob.x + (b.x0 + b.x1) / 2).toFixed(3), +(ob.y + (b.y0 + b.y1) / 2).toFixed(3), +(ob.z + (where === 'centre' || where === 'center' ? (b.z0 + b.z1) / 2 : b.z1)).toFixed(3)];
+  }
+
+  /**
    * Shapes that are not objects: particle paths, arrows, field lines, guides, ripples.
    * They take up no room. Nothing avoids them, they throw no shadow, and they are never reported as
    * overlapping anything, so they can run round and between the objects. Coordinates are scene cells.
@@ -430,7 +446,7 @@ export class Scene {
   build() { return compile(this); }
 }
 
-const METHODS = ['add', 'draw', 'link', 'zone', 'text', 'callout', 'expect', 'zoom', 'row', 'grid', 'ring', 'define', 'custom', 'svg', 'float', 'story', 'send', 'move', 'pulse', 'glow', 'pop', 'show', 'hide', 'lift', 'drop', 'grow', 'tint', 'shake', 'mark', 'say', 'wait', 'build', 'toSVG'];
+const METHODS = ['add', 'draw', 'point', 'link', 'zone', 'text', 'callout', 'expect', 'zoom', 'row', 'grid', 'ring', 'define', 'custom', 'svg', 'float', 'story', 'send', 'move', 'pulse', 'glow', 'pop', 'show', 'hide', 'lift', 'drop', 'grow', 'tint', 'shake', 'mark', 'say', 'wait', 'build', 'toSVG'];
 const METHOD_ALIAS = { overlay: 'draw', shapes: 'draw', layer: 'draw', camera: 'zoom', focus: 'zoom', assert: 'expect', check: 'expect', verify: 'expect', connect: 'link', arrow: 'link', edge: 'link', line: 'link', object: 'add', place: 'add', put: 'add', node: 'add', group: 'zone', region: 'zone', area: 'zone', annotate: 'callout', caption: 'say', narrate: 'say', emit: 'send', flow: 'send', highlight: 'glow', reveal: 'pop', appear: 'pop', rise: 'grow', raise: 'grow', pause: 'wait', delay: 'wait', sleep: 'wait', timeline: 'story', sequence: 'story', hover: 'float', render: 'build', compile: 'build' };
 
 /** Create a scene. Calling a method that does not exist explains what to use instead. */

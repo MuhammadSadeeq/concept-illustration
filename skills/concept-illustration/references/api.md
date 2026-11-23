@@ -197,6 +197,8 @@ s.callout([0, 0, 2], 'Coil', { rise: 70, length: 40 });                // text l
 
 `from` and `until` (seconds) put a callout on screen for part of the loop only: name a thing while it exists, or show a changing value with several callouts at one point.
 
+`s.point(obj, 'name')` gives the position of a named shape of an object, as `[x, y, z]` at its top (`s.point(obj, 'name', 'centre')` for its middle), so a callout can be aimed at a part without working out where it is: `s.callout(s.point(battery, 'neg'), 'Negative terminal')`. The same point serves as the end of a link, which otherwise stops at the object's outline: `s.link(s.point(battery, 'neg'), lamp)`.
+
 Callouts name the parts of one object, where labels name whole objects. `side` is `'right'` or `'left'`; `rise` lifts the text above the point (negative lowers it) and `length` sets how far the leader runs sideways, both in pixels. Use them to move text onto empty background.
 
 ## Story
