@@ -1,7 +1,7 @@
 // The object kit: ready-made isometric objects built from the primitives.
 // Sizes are in grid cells. Every builder returns { parts, w, d, h } plus optional extras.
 
-import { rectOutline, circleOutline, UNIT, SPHERE_K } from './geom.mjs';
+import { rectOutline, circleOutline, UNIT, SPHERE_K, proj } from './geom.mjs';
 import { rgba, mix, adjust, isHex } from './color.mjs';
 import { ICONS } from './icons.mjs';
 
@@ -1025,8 +1025,32 @@ export const SHAPES = {
       return `<circle r="${+(r * UNIT).toFixed(1)}" fill="url(#${id})"/>`;
     },
   }),
+  /** A straight arrow between two points in space: a force, a velocity, a field, a direction of flow. */
+  arrow: ({ from = [0, 0, 0], to = [1, 0, 0], color = 'accent', width = 3, head = 1, dash, ...rest }) => ({
+    t: 'raw', at: [from[0], from[1], from[2] || 0], ...rest,
+    box: { x0: Math.min(from[0], to[0]) - 0.03, y0: Math.min(from[1], to[1]) - 0.03, z0: Math.min(from[2] || 0, to[2] || 0) - 0.03, x1: Math.max(from[0], to[0]) + 0.03, y1: Math.max(from[1], to[1]) + 0.03, z1: Math.max(from[2] || 0, to[2] || 0) + 0.03 },
+    svg: (ctx) => {
+      const hex = isHex(color) ? color : ctx.theme.roles[color] || ctx.theme.roles.accent;
+      const a = proj(from[0], from[1], from[2] || 0), b = proj(to[0], to[1], to[2] || 0);
+      const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len, uy = dy / len, hl = Math.min(len * 0.6, (7 + width * 2.4) * head), hw = hl * 0.42;
+      const bx = dx - ux * hl, by = dy - uy * hl, n = (v) => +v.toFixed(1);
+      return `<path d="M0 0L${n(bx)} ${n(by)}" stroke="${hex}" stroke-width="${width}" stroke-linecap="round" fill="none"${dash ? ` stroke-dasharray="${dash}"` : ''}/>`
+        + `<path d="M${n(dx)} ${n(dy)}L${n(bx - uy * hw)} ${n(by + ux * hw)}L${n(bx + uy * hw)} ${n(by - ux * hw)}Z" fill="${hex}" stroke="${hex}" stroke-width="1" stroke-linejoin="round"/>`;
+    },
+  }),
+  /** Rings that spread out and fade, lying on a plane: 'top' for ripples on the floor, 'left' or 'right' for a wall. */
+  ripple: ({ x = 0, y = 0, z = 0.02, plane = 'top', r = 1, count = 3, period = 2.4, color = 'accent', width = 1.6, ...rest }) => ({
+    t: 'decal', plane, o: [x, y, z], size: [0.1, 0.1], turn: 0, ...rest,
+    items: Array.from({ length: count }, (_, i) => ({ t: 'circle', cx: 0, cy: 0, r: r / 1.25, stroke: color, sw: width / UNIT, anim: { type: 'ring', period, phase: i / count } })),
+  }),
+  /**
+   * Many small particles on one path [[x, y, z], ...]: charge in a wire, water in a pipe, air carrying sound.
+   * mode 'drift' (they travel), 'alternate' (they rock to and fro in step), 'zigzag' (they travel, jostling).
+   */
+  stream: ({ points, closed = false, ...rest }) => ({ t: 'stream', pts: points, closed, ...rest }),
   /** Several shapes that move as one: sh.group({ parts: [...], anim }). */
-  group: ({ parts, anim, sort, opacity }) => ({ t: 'group', parts, anim, sort, opacity }),
+  group: ({ parts, anim, sort, opacity, name }) => ({ t: 'group', parts, anim, sort, opacity, name }),
   /** A thin line through points in space [[x, y, z], ...]: a cable, an antenna, a beam. */
   wire: ({ points, color, width = 1.5, dash, ...rest }) => ({ t: 'line', pts: points, stroke: color, sw: width, dash, ...rest }),
   outline: {

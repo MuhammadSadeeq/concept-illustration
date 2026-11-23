@@ -63,6 +63,12 @@ Put a mechanism into a labelled scene and you get a model that teaches. Here the
   <img src="gallery/ac-generator.svg" alt="A hand-turned generator: a coil of wire spins between a north and a south magnet, slip rings carry the alternating current through a loop of wire to a glowing lamp and a meter whose needle swings both ways" width="760">
 </p>
 
+The same goes for anything made of many small things in motion. Below, each particle of air only rocks to and fro, a little later than its neighbour, and the squeeze travels although no particle does. One line of scene script draws a whole row of them.
+
+<p align="center">
+  <img src="gallery/sound-wave.svg" alt="A speaker cone pushes rows of air particles; each particle only rocks back and forth while bands of squeezed air travel to a microphone, and a level meter rises and falls with each wave" width="640">
+</p>
+
 ## One scene, many looks
 
 A look is three independent choices: a **palette** (22 built in, or any brand colours), a **finish** (solid, soft, outline, hairline, flat, neon) and a **floor** (grid, dots, a raised plate, rings, none). Every combination is coherent because all tones are derived from the palette in a perceptual colour space. There is no default look: the skill directs the agent to choose for the subject, and a scene that chooses nothing gets one picked from its title.
@@ -129,13 +135,14 @@ The engine takes it from there:
 - **Layout.** Connectors route along the floor grid and stop where an object's outline begins. Labels pick the side with room. The frame crops to the content.
 - **Motion.** A story of cause and effect compiles to CSS keyframes. Tokens pass correctly behind and in front of objects. Loops close exactly, so exported video and GIFs never jump.
 - **A checker.** Every build reports collisions, hidden links, overlapping labels, crowding and missing focus, each with the fix.
+- **Proof, not eyeballing.** Whether a current flows the right way or a caption arrives with the thing it describes is not something a layout checker can know. So the build can print what moves, when and which way in plain words; review sheets can show chosen moments close up with motion trails; and a scene can state facts about its own motion (`s.expect(3, at => at('electron').x < 0)`) that the build verifies with the same arithmetic the browser uses.
 
 ## Not limited to the kit
 
 Fifty objects and ninety-five icons cover a lot, and the skill tells the agent to go past them whenever the subject needs it:
 
 - **Any object.** `s.define` builds new objects from the same shapes the kit uses (blocks, cylinders, extrusions, cones, spheres, artwork on faces). The bakery scene above defines its own oven and loaf in twenty lines.
-- **Any mechanism.** Parts of an object can slide, lift, swing, orbit an axis and run keyframed sequences of their own, which is how the vignettes and the generator above are made.
+- **Any mechanism.** Parts of an object can slide, lift, swing, orbit an axis and run keyframed sequences of their own, which is how the vignettes and the generator above are made. Streams of particles, vector arrows, ripples, gauges and changing readouts are ready-made.
 - **Any drawing.** `s.svg` stands arbitrary SVG artwork in the scene.
 - **Real movement.** Objects slide, rise out of the floor, lift, appear and change state; tokens can be any object. Objects can also be translucent, or ghosted to stand for something planned or missing.
 - **Experiences.** `--experience step` produces an interactive page where a reader walks through the story one caption at a time; `scroll` ties it to the page scroll; objects answer a hover or tap with a detail card. Open [`gallery/request-lifecycle.experience.html`](gallery/request-lifecycle.experience.html) locally to try one.

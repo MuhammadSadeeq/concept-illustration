@@ -40,7 +40,8 @@ Contents: [scene](#scene) · [looks](#looks) · [objects](#objects) · [custom o
 | `bg` | from the look | A hex colour for a flat background, to match a known surface such as a white card |
 | `grid` | from the floor | `true`, `false`, `'lines'` or `'dots'`: overrides the floor's pattern |
 | `aspect` | natural | Pad the frame to a ratio: `'16:9'`, `'1:1'`, `'4:3'`, or a number. Adds margin only; the scene keeps its size |
-| `pad` | `56` | Margin around the content, in viewBox units (pixels at natural size): a number, `[sides, top-and-bottom]` or `[top, right, bottom, left]`. The frame is cropped to objects at rest, so widen it when a part swings or travels beyond its object |
+| `pad` | `56` | Margin around the content, in viewBox units (pixels at natural size): a number, `[sides, top-and-bottom]` or `[top, right, bottom, left]`. The frame covers every object over its whole motion (parts that slide, orbit and spin included) |
+| `size` | from content | `[width, height]` in pixels: the image keeps exactly this size however the content changes, and the scene is fitted inside it. Use it wherever the image sits in a fixed slot on a page |
 | `loop` | story length | Minimum loop length in seconds |
 | `intro` | `true` | Objects rise into place once when the image loads |
 | `shadows` | `true` | Ground shadows |
@@ -182,9 +183,13 @@ s.callout([4.5, 0, 1.9], 'Hot path', { sub: '2 ms', side: 'right' });   // leade
 s.callout([0, 0, 2], 'Coil', { rise: 70, length: 40 });                // text lifted 70 px clear of the point
 ```
 
+`from` and `until` (seconds) put a callout on screen for part of the loop only: name a thing while it exists, or show a changing value with several callouts at one point.
+
 Callouts name the parts of one object, where labels name whole objects. `side` is `'right'` or `'left'`; `rise` lifts the text above the point (negative lowers it) and `length` sets how far the leader runs sideways, both in pixels. Use them to move text onto empty background.
 
 ## Story
+
+All times are seconds on the scene clock: 0 is the moment the story starts, after the intro, and moving parts, flows, captions and the review sheet all count from it.
 
 `s.story(steps, options)` defines one loop. `steps` is an array: items run in order; a nested array runs its items together; an array nested inside that runs in order again.
 
@@ -198,6 +203,8 @@ s.story([
 ```
 
 Story options: `speed` (cells per second for tokens, default 3.4), `gap` (pause between steps, default 0.12), `hold` (pause before the loop restarts, default 0.9).
+
+Every step also takes `at: seconds`: it then starts at that moment on the scene clock, and the steps after it follow on from there. `s.say('…', { at: 6 })`, `s.pulse(obj, { at: 2.5 })`. Set the scene's `loop` to the length you are timing against. `delay: seconds` holds one step back without moving the ones after it.
 
 | Step | Options | What it shows |
 | --- | --- | --- |
@@ -250,7 +257,10 @@ node SKILL_DIR/scripts/build.mjs <file>.scene.mjs [options]
 | Option | Effect |
 | --- | --- |
 | `--out DIR` | Write outputs to DIR (default: next to the script) |
-| `--sheet` `--frames N` | Also write `<name>.sheet.png`: up to N frames (default 8) taken at the story's key moments |
+| `--sheet` `--frames N` | Also write `<name>.sheet.png`: up to N frames (default 8) taken at the story's key moments. `--frames 2.3,2.6` takes exactly those moments (seconds on the scene clock), shown large |
+| `--trails [SEC]` | On the sheet, lay a faint trail behind everything that moved in the last SEC seconds (default 0.3), so a still frame shows direction |
+| `--focus ID` `--focus x,y,z` `--zoom N` | Crop the sheet and PNG to one object (its id is printed by `--motion` and in errors) or around a point, optionally N times closer |
+| `--motion` | Print the story's timeline and every self-moving part: where it is at each key moment and which way it goes in the picture |
 | `--png` `--at SEC` `--scale N` | Also write `<name>.png`. Without `--at` it shows the resting state |
 | `--mp4` `--gif` `--webm` | Also write a video of one loop. `--fps 30` `--width 1280` `--loops 1` `--intro` |
 | `--look NAME` `--finish NAME` `--floor NAME` | Build with another look without editing the script |
@@ -282,5 +292,15 @@ Building is deterministic: the same script always yields the same SVG.
 ## What the checker covers
 
 The review sheet (`--sheet`) shows each frame on the scene's own background; a scene built with `background: false` is shown on white or near-black to match its look. Add `--frames 12` when something quick, such as a burst of tokens, falls between the frames.
+
+### Stating facts about the motion
+
+```js
+s.expect(3, (at) => at('electron').x < 0, 'the electron is left of the nucleus at 3 s');           // one moment
+s.expect([0, 12], (at) => at(arm, 'head').z > 0.5, 'the head never touches the platter');          // every moment in a range
+s.expect(1.5, (at) => Math.abs(at('needle').angle) < 5, 'the needle is centred when the coil is upright');
+```
+
+`at(ref, part)` returns `{ x, y, z, opacity, angle }` at that time: `x, y, z` in cells (the centre of the shape, or the origin of an object), `angle` in degrees for artwork that turns. `ref` is an object handle, an object id, or the `name` given to a shape, group or artwork item; pass an object and a name when two objects have parts with the same name. The build evaluates the same easing and timing the browser will, and lists any expectation that is false under FIX THESE, with the values it found. Tokens sent with `s.send` are not addressable.
 
 The report is produced from the scene's geometry: objects that intersect, links that run under objects or kink, labels that collide, hidden objects never revealed, crowding, missing focal point, missing motion, extreme proportions and over-long loops. It does not judge whether the picture makes its point, and it does not inspect every frame of the animation. Use the sheet or the preview for that.

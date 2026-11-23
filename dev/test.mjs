@@ -201,6 +201,76 @@ throws('a builder must return parts', () => { const s = iso.scene({}); s.define(
   ok('dark looks are marked for review sheets', r.svg.includes('data-dark="1"'));
 }
 
+// one clock, checking tools and components
+{
+  const { scene } = iso;
+  const { cropSvg } = await import('../skills/concept-illustration/scripts/render.mjs');
+  const mk = (extra = () => {}) => {
+    const s = scene({ look: 'studio', title: 'Clock', loop: 6 });
+    const m = s.custom({ at: [0, 0], id: 'machine', parts: (sh) => [
+      sh.box({ w: 4, d: 1.2, h: 0.3, color: 'body' }),
+      sh.box({ name: 'gate', z: 0.3, w: 0.2, d: 1, h: 0.9, color: 'accent', anim: { type: 'keys', period: 6, keys: [{ at: 0, move: [0, 0, 0] }, { at: 0.5, move: [0, 0, 1] }, { at: 1, move: [0, 0, 0] }] } }),
+      sh.sphere({ name: 'moon', z: 2, r: 0.15, color: 'accent2', anim: { type: 'orbit', axis: 'z', r: 1, period: 6, sense: 'ccw' } }),
+      sh.box({ name: 'late', x: 1.5, z: 0.3, w: 0.3, d: 0.3, h: 0.3, anim: { type: 'move', by: [0, 0, 1], period: 6, hold: 0, delay: 1 } }),
+      sh.box({ name: 'early', x: -1.5, z: 0.3, w: 0.3, d: 0.3, h: 0.3, anim: { type: 'move', by: [0, 0, 1], period: 6, hold: 0, phase: 0.25 } }),
+    ] });
+    extra(s, m);
+    return s;
+  };
+  const r = mk((s, m) => {
+    s.callout([0, 0, 2], 'Only for a while', { from: 2, until: 4 });
+    s.story([s.say('First', { at: 0.5 }), s.say('Second', { at: 3 }), s.pulse(m, { at: 4 })]);
+  }).build();
+  // every repeating motion is timed from the moment the story starts
+  const delays = [...r.svg.matchAll(/animation:[\w-]+ ([\d.]+)s [^;"]*? (-?[\d.]+)s infinite/g)].map((m) => +m[2]);
+  ok('loops that share the scene clock start no later than the story', delays.length > 3 && delays.filter((d) => d > r.intro + 0.001).length === 0);
+  ok('captions pinned with at: land on those seconds', /&quot;t&quot;:0.5,/.test(r.svg) && /&quot;t&quot;:3,/.test(r.svg));
+  ok('a timed callout fades in and out', /Only for a while/.test(r.svg) && r.svg.split('Only for a while')[0].lastIndexOf('<g style="animation:') > r.svg.split('Only for a while')[0].length - 900);
+  const motion = r.motion();
+  ok('motion report lists the story and the parts', motion.timeline.some((t) => /caption "Second"/.test(t.text) && Math.abs(t.t0 - 3) < 1e-6) && motion.parts.some((l) => /machine › moon\s+circles the z axis anticlockwise/.test(l)) && motion.parts.some((l) => /gate/.test(l)));
+
+  const facts = mk((s, m) => {
+    s.expect(3, (at) => Math.abs(at('gate').z - 1.75) < 0.01, 'gate is fully up at half time');
+    s.expect(1.5, (at) => at('moon').y < -0.99 && Math.abs(at('moon').x) < 0.01, 'anticlockwise in the picture: +x round to -y');
+    s.expect(1, (at) => Math.abs(at('late').z - 0.45) < 0.01, 'a delayed part has not started after its delay');
+    s.expect(1.5, (at) => Math.abs(at('early').z - 1.45) < 0.01, 'a part with phase 0.25 is a quarter period ahead');
+    s.expect([0, 6], (at) => at(m).x === 0 && at('gate').z >= 0.74, 'ranges are checked throughout');
+  }).build();
+  ok('true expectations pass', !facts.notes.some((n) => n.code === 'expect'), facts.notes.map((n) => n.msg).join(' | '));
+  const wrong = mk((s) => s.expect(3, (at) => at('gate').z < 1, 'gate is down at 3 s')).build();
+  ok('a false expectation is reported with what was found', wrong.notes.some((n) => n.level === 'warn' && n.code === 'expect' && /gate at \(0, 0, 1\.75\)/.test(n.msg)));
+  throws('expect names what exists', () => mk((s) => s.expect(1, (at) => at('nothing').x > 0)).build(), /Named parts: .*gate/);
+
+  const c = scene({ look: 'ocean', title: 'Components', loop: 8, size: [640, 480] });
+  c.custom({ at: [0, 0], id: 'rig', parts: (sh) => [
+    sh.box({ w: 3, d: 2, h: 0.2, color: 'body', top: (fw, fh) => [
+      { t: 'bar', x: 0.2, y: 0.2, w: 0.2, h: 1, fill: 'accent', levels: [[0, 0.2], [0.5, 0.9], [1, 0.2]] },
+      { t: 'bar', x: 0.6, y: 0.2, w: 1, h: 0.2, fill: 'gold', level: 0.5, from: 'left' },
+      { t: 'readout', x: 2, y: 1, size: 0.3, fill: 'paper', values: [[0, '0'], [0.5, '27']] },
+    ] }),
+    sh.stream({ points: [[-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]], closed: true, count: 12, period: 8, color: 'gold' }),
+    sh.stream({ points: [[-2, 0, 1.5], [2, 0, 1.5]], mode: 'alternate', swing: 0.2, wavelength: 2, period: 2, count: 10 }),
+    sh.stream({ points: [[-2, 0, 2], [2, 0, 2]], mode: 'zigzag', count: 6, period: 4 }),
+    sh.arrow({ from: [0, 0, 2.4], to: [1.5, 0, 2.4], color: 'danger' }),
+    sh.ripple({ z: 0.22, r: 0.8, count: 2 }),
+    sh.sphere({ z: 3, r: 0.1, anim: { type: 'keys', period: 8, fade: true, keys: [{ at: 0, move: [0, 0, 0] }, { at: 1, move: [6, 0, 0] }] } }),
+  ] });
+  const cr = c.build();
+  ok('size fixes the image size', cr.width === 640 && cr.height === 480 && /width="640" height="480"/.test(cr.svg));
+  ok('streams share keyframes', (cr.svg.match(/@keyframes/g) || []).length < 40 && (cr.svg.match(/<circle r="2\.4"/g) || []).length >= 28, `${(cr.svg.match(/@keyframes/g) || []).length} keyframes`);
+  ok('bar, readout and role colours in artwork', />27<\/text>/.test(cr.svg) && /step-end/.test(cr.svg) && /scale\(1,0\.9\)/.test(cr.svg) && !/fill="(accent|gold|paper|danger)"/.test(cr.svg));
+  ok('arrow and ripple draw', /stroke-linejoin="round"\/>/.test(cr.svg) && /scale\(\.3\)/.test(cr.svg));
+  ok('the frame holds a part over its whole travel', (() => { const vb = cr.svg.match(/viewBox="([-\d. ]+)"/)[1].split(' ').map(Number); const far = iso.scene ? 6 * 34.64 : 0; return vb[0] + vb[2] > far; })());
+  ok('fade hides a jump at the restart', /0%\{opacity:0\}5%\{opacity:1\}95%\{opacity:1\}100%\{opacity:0\}/.test(cr.svg));
+  ok('moving components count as motion', !cr.notes.some((n) => n.code === 'static'));
+  const crop = cropSvg(cr.svg, { focus: 'rig', zoom: 2 });
+  ok('cropSvg zooms on an object', /viewBox="[-\d. ]+" width="\d+" height="\d+"/.test(crop) && +crop.match(/viewBox="[-\d.]+ [-\d.]+ ([\d.]+)/)[1] < +cr.svg.match(/viewBox="[-\d.]+ [-\d.]+ ([\d.]+)/)[1]);
+  throws('cropSvg names the ids', () => cropSvg(cr.svg, { focus: 'nope' }), /Ids in this scene: rig/);
+  const tiny = scene({ look: 'paper', title: 'Tiny' });
+  tiny.custom({ at: [0, 0], parts: (sh) => [sh.box({ w: 1, d: 1, h: 1, left: () => [{ t: 'text', x: 0.5, y: 0.5, text: 'small', size: 0.12 }] })] });
+  ok('unreadable text is flagged', tiny.build().notes.some((n) => n.code === 'text-small'));
+}
+
 // every example must be well-formed XML: used as <img>, an SVG is parsed strictly
 {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-xml-'));

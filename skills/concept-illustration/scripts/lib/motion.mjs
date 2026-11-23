@@ -28,6 +28,7 @@ export const EASE_FN = {
   out: bez(0.16, 1, 0.3, 1),
   in: bez(0.7, 0, 0.84, 0),
   sine: bez(0.37, 0, 0.63, 1),
+  back: bez(0.34, 1.56, 0.64, 1),
 };
 
 const pct = (t, T) => {
@@ -147,9 +148,11 @@ export function schedule(steps, t0, gap, durOf, parallel = false, read = { since
       if (parallel) end = Math.max(end, sub.end); else { t = sub.end + gap; end = sub.end; }
       continue;
     }
+    // at: an absolute time on the scene clock. The step starts then, whatever came before it.
+    if (st.at != null && Number.isFinite(+st.at)) { start = +st.at; if (!parallel) t = start; }
     if (st.type === 'say') {
       // a caption stays long enough to be read before the next one replaces it
-      if (start - read.since < read.need) { start = read.since + read.need; if (!parallel) t = start; }
+      if (st.at == null && start - read.since < read.need) { start = read.since + read.need; if (!parallel) t = start; }
       read.since = start;
       read.need = Math.max(1.3, String(st.text || '').length * 0.042);
     }

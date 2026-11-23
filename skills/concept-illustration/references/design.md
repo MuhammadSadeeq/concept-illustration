@@ -178,6 +178,8 @@ Motion shows cause and effect. Everything else is noise.
 - **Direction matters.** Main flow along `x`. A return trip visibly comes back the same way with a different token.
 - **Pace.** A hop takes about a second. 6 to 12 seconds per loop; past 16 the viewer leaves before the result.
 - **Ambient motion is seasoning.** One floating hero or one flowing link. With a rich story, none.
+- **Words and picture together.** A caption that arrives a second before or after the thing it describes is worse than no caption. Pin captions to the moments they describe (`{ at: seconds }`) and read the timeline printed by `--motion` to confirm.
+- **Direction is content.** Which way a current flows, a planet turns or a wave travels is part of what the picture claims. Decide it from the subject, state it, and check it; never leave it to how the axes happen to run.
 - **Still first.** With motion off (reduced-motion settings, a PDF, a thumbnail) the picture shows the resting state with tokens parked on their routes. That frame must make the claim.
 
 **Story, flow or stillness?**

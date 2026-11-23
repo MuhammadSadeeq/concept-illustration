@@ -299,7 +299,10 @@ const attrs = (it, ctx) => {
   const style = [it.style, it.anim && ctx ? ctx.animStyle(it.anim, it.flat !== false) : ''].filter(Boolean).join(';');
   return (it.cls ? ` class="${it.cls}"` : '') + (style ? ` style="${style}"` : '') + (it.id ? ` id="${it.id}"` : '');
 };
-const paint = (it, ctx) => {
+// colours in artwork may be palette roles ('accent', 'gold', 'danger', ...) as well as hex values
+const col = (v, ctx) => (ctx && v && ctx.theme.roles[v] ? ctx.theme.roles[v] : v);
+const paint = (raw, ctx) => {
+  const it = { ...raw, fill: col(raw.fill, ctx), stroke: col(raw.stroke, ctx) };
   let s;
   if (it.fade && it.fill && ctx) {
     // fade: [x1, y1, x2, y2] — the fill is at full strength at the first point and gone at the second
@@ -341,7 +344,8 @@ export function renderFlat(ctx, items) {
         break;
       case 'text': {
         const size = it.size || 0.3;
-        out += `<text x="${r2(it.x)}" y="${r2(it.y)}" font-size="${r2(size)}" font-family="${esc(it.mono ? ctx.theme.mono : ctx.theme.font)}" font-weight="${it.weight || 700}" text-anchor="${it.anchor || 'middle'}" dominant-baseline="central" fill="${it.fill || '#000'}"${it.ls ? ` letter-spacing="${it.ls}"` : ''}${it.op != null ? ` opacity="${it.op}"` : ''}${attrs(it, ctx)}>${esc(it.text)}</text>`;
+        if (ctx && ctx.sawText) ctx.sawText(size, it.text);
+        out += `<text x="${r2(it.x)}" y="${r2(it.y)}" font-size="${r2(size)}" font-family="${esc(it.mono ? ctx.theme.mono : ctx.theme.font)}" font-weight="${it.weight || 700}" text-anchor="${it.anchor || 'middle'}" dominant-baseline="central" fill="${col(it.fill, ctx) || '#000'}"${it.ls ? ` letter-spacing="${it.ls}"` : ''}${it.op != null ? ` opacity="${it.op}"` : ''}${attrs(it, ctx)}>${esc(it.text)}</text>`;
         break;
       }
       case 'icon': {
@@ -360,11 +364,33 @@ export function renderFlat(ctx, items) {
         else out += `${open}${attrs(it, ctx)}>${renderFlat(ctx, it.items)}</g>`;
         break;
       }
+      case 'bar': {
+        // a bar that fills to a level: fixed (level) or changing over the period (levels: [[at, value, ease], ...])
+        const w = it.w ?? 0.2, h = it.h ?? 1, side = it.from === 'left';
+        const lv = it.levels ? it.levels.map(([at, v, ease]) => ({ at, [side ? 'scaleX' : 'scaleY']: Math.max(0.001, v), [side ? 'scaleY' : 'scaleX']: 1, ease: ease || 'inOut' })) : null;
+        const still = `scale(${side ? r2(it.level ?? 1) : 1} ${side ? 1 : r2(it.level ?? 1)})`;
+        if (it.track !== false) out += `<rect x="${r2(it.x)}" y="${r2(it.y)}" width="${r2(w)}" height="${r2(h)}"${it.r ? ` rx="${r2(it.r)}"` : ''} fill="${col(it.track || it.fill || '#000', ctx)}" fill-opacity="${it.track ? 1 : 0.16}"/>`;
+        const style = lv && ctx ? ctx.animStyle({ type: 'keys', period: it.period, phase: it.phase, delay: it.delay, keys: lv }, true) : '';
+        out += `<g transform="translate(${r2(it.x)} ${r2(it.y + h)})"><rect x="0" y="${r2(-h)}" width="${r2(w)}" height="${r2(h)}"${it.r ? ` rx="${r2(it.r)}"` : ''} fill="${col(it.fill || '#000', ctx)}"${style ? ` style="${style}"` : ` transform="${still}"`}/></g>`;
+        break;
+      }
+      case 'readout': {
+        // text that changes over the period: values: [[at, 'text'], ...]; each shows until the next takes over
+        const vals = [...(it.values || [])].sort((a, b) => a[0] - b[0]);
+        const size = it.size || 0.3;
+        if (ctx && ctx.sawText && vals.length) ctx.sawText(size, vals[0][1]);
+        vals.forEach(([at, text], i) => {
+          const until = i < vals.length - 1 ? vals[i + 1][0] : 1 + (vals[0][0] || 0);
+          const style = ctx && vals.length > 1 ? ctx.animStyle({ type: 'show', period: it.period, phase: it.phase, delay: it.delay, from: at, to: until }, true) : '';
+          out += `<text x="${r2(it.x)}" y="${r2(it.y)}" font-size="${r2(size)}" font-family="${esc(it.mono === false ? ctx.theme.font : ctx.theme.mono)}" font-weight="${it.weight || 700}" text-anchor="${it.anchor || 'middle'}" dominant-baseline="central" fill="${col(it.fill || '#000', ctx)}"${style ? ` style="${style}"` : ''}>${esc(String(text))}</text>`;
+        });
+        break;
+      }
       case 'raw':
         out += it.svg;
         break;
       default:
-        throw new Error(`Unknown flat item type "${it.t}".`);
+        throw new Error(`Unknown flat item type "${it.t}". Use rect, circle, ellipse, line, path, poly, text, icon, bar, readout or g.`);
     }
   }
   return out;
@@ -397,6 +423,11 @@ export function primBox(p) {
     case 'line': return lineBox(p);
     case 'decal': return decalBox(p);
     case 'raw': return p.box;
+    case 'stream': {
+      const e = (p.r ?? 0.06) + (typeof p.swing === 'number' ? p.swing : 0) + (p.jitter || 0);
+      const xs = p.pts.map((q) => q[0]), ys = p.pts.map((q) => q[1]), zs = p.pts.map((q) => q[2] || 0);
+      return aabb(Math.min(...xs) - e, Math.min(...ys) - e, Math.min(...zs) - e, Math.max(...xs) + e, Math.max(...ys) + e, Math.max(...zs) + e);
+    }
     case 'group': {
       let b = null;
       for (const c of p.parts) {
@@ -409,6 +440,47 @@ export function primBox(p) {
   }
 }
 
+const boxUnion = (a, b) => (!a ? b : !b ? a : aabb(Math.min(a.x0, b.x0), Math.min(a.y0, b.y0), Math.min(a.z0, b.z0), Math.max(a.x1, b.x1), Math.max(a.y1, b.y1), Math.max(a.z1, b.z1)));
+// how far artwork reaches from the origin of its group, for artwork that turns
+const reach = (items) => {
+  let r = 0;
+  for (const it of items || []) {
+    if (!it) continue;
+    const pts = it.t === 'line' ? [[it.x1, it.y1], [it.x2, it.y2]] : it.t === 'poly' ? it.pts : it.t === 'rect' || it.t === 'bar' ? [[it.x, it.y], [it.x + (it.w || 0), it.y + (it.h || 0)]]
+      : it.t === 'circle' ? [[(it.cx || 0) + it.r, it.cy || 0], [(it.cx || 0) - it.r, it.cy || 0], [it.cx || 0, (it.cy || 0) + it.r], [it.cx || 0, (it.cy || 0) - it.r]] : it.t === 'text' || it.t === 'icon' ? [[it.x || 0, it.y || 0]] : [];
+    for (const q of pts) r = Math.max(r, Math.hypot(q[0] || 0, q[1] || 0));
+    if (it.t === 'g') r = Math.max(r, Math.hypot(it.tx || 0, it.ty || 0) + reach(it.items) * (it.scale || 1));
+  }
+  return r;
+};
+
+/** The box a shape occupies over its whole motion, not only at rest: used to frame the picture. */
+export function sweepBox(p) {
+  if (!p) return null;
+  let b = p.t === 'group' ? p.parts.filter(Boolean).reduce((acc, c) => boxUnion(acc, sweepBox(c)), null) : primBox(p);
+  if (p.t === 'decal') {
+    // artwork that spins or swings sweeps a disc in its plane
+    const P = PLANES[p.plane || 'top'], o = p.o || [0, 0, 0];
+    for (const it of p.items || []) {
+      if (!it || it.t !== 'g' || !it.anim || !['spin', 'swing', 'keys'].includes(it.anim.type)) continue;
+      const R = reach(it.items) * (it.scale || 1), c = add3(add3(o, mul3(P.U, it.tx || 0)), mul3(P.V, it.ty || 0));
+      const ext = [0, 1, 2].map((i) => R * Math.max(Math.abs(P.U[i]), Math.abs(P.V[i])));
+      b = boxUnion(b, aabb(c[0] - ext[0], c[1] - ext[1], c[2] - ext[2], c[0] + ext[0], c[1] + ext[1], c[2] + ext[2]));
+    }
+  }
+  const a = p.anim;
+  if (a && b) {
+    const rest = b;
+    const moves = a.type === 'move' ? [a.by || [0, 0, 0.5]] : a.type === 'keys' ? (a.keys || []).map((k) => k.move).filter(Boolean) : [];
+    for (const m of moves) b = boxUnion(b, aabb(rest.x0 + (m[0] || 0), rest.y0 + (m[1] || 0), rest.z0 + (m[2] || 0), rest.x1 + (m[0] || 0), rest.y1 + (m[1] || 0), rest.z1 + (m[2] || 0)));
+    if (a.type === 'orbit') {
+      const r = a.r ?? 0.5, ax = a.axis || { right: 'x', left: 'y', top: 'z' }[a.plane] || 'x';
+      b = aabb(rest.x0 - (ax === 'x' ? 0 : r), rest.y0 - (ax === 'y' ? 0 : r), rest.z0 - (ax === 'z' ? 0 : r), rest.x1 + (ax === 'x' ? 0 : r), rest.y1 + (ax === 'y' ? 0 : r), rest.z1 + (ax === 'z' ? 0 : r));
+    }
+  }
+  return b;
+}
+
 export function renderPrim(ctx, p) {
   let inner;
   switch (p.t) {
@@ -418,6 +490,7 @@ export function renderPrim(ctx, p) {
     case 'cone': inner = renderCone(ctx, p); break;
     case 'line': inner = renderLine(ctx, { ...p, anim: null }); break;
     case 'decal': inner = renderDecal(ctx, p); break;
+    case 'stream': inner = ctx.stream ? ctx.stream(p) : ''; break;
     case 'raw': {
       const [x, y] = projP(p.at);
       inner = `<g transform="translate(${f(x)} ${f(y)})${p.scale ? ` scale(${p.scale})` : ''}">${typeof p.svg === 'function' ? p.svg(ctx) : p.svg}</g>`;

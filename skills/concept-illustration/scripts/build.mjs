@@ -4,6 +4,8 @@
 //   node build.mjs my.scene.mjs                 -> my.svg + my.html (next to the script)
 //   node build.mjs my.scene.mjs --sheet         -> also my.sheet.png (frames across the loop)
 //   node build.mjs my.scene.mjs --png --at 2.5  -> also my.png (still at 2.5s; omit --at for the resting state)
+//     review options: --frames 2.3,2.6 (those moments) · --trails (show direction of motion) · --focus <id | x,y,z> · --zoom 3
+//   node build.mjs my.scene.mjs --motion        -> print where every moving part is, and which way it goes
 //   node build.mjs my.scene.mjs --mp4 | --gif | --webm
 //   node build.mjs my.scene.mjs --looks          -> also my.looks.png (the scene in several looks)
 //   node build.mjs my.scene.mjs --experience step -> also my.experience.html (interactive)
@@ -142,8 +144,16 @@ async function main() {
   if (wantsRaster) {
     const R = await import('./render.mjs');
     try {
-      if (flag('sheet')) made.push(await R.renderSheet(r.svg, path.join(outDir, `${name}.sheet.png`), { frames: +val('frames', 8) }));
-      if (flag('png')) made.push(await R.renderPng(r.svg, path.join(outDir, `${name}.png`), { at: val('at') != null ? +val('at') : null, scale: +val('scale', 2) }));
+      // a closer look: --focus <object id | x,y,z> and/or --zoom 3 crop every raster output
+      const nums = (v) => String(v).split(',').map(Number);
+      const focusArg = val('focus'), zoomArg = +val('zoom', 0) || null;
+      const focus = focusArg ? (/^-?[\d.]+(,-?[\d.]+)+$/.test(focusArg) ? nums(focusArg) : focusArg) : null;
+      const view = focus || zoomArg ? R.cropSvg(r.svg, { focus, zoom: zoomArg }) : r.svg;
+      // --frames 12 asks for that many frames; --frames 2.3,2.6 (or --at 2.3,2.6) asks for those moments
+      const fr = val('frames', '8'), at = val('at');
+      const times = /,/.test(fr) ? nums(fr) : at && /,/.test(at) ? nums(at) : null;
+      if (flag('sheet')) made.push(await R.renderSheet(view, path.join(outDir, `${name}.sheet.png`), { frames: times ? times.length : +fr || 8, times, trails: flag('trails') ? +val('trails') || 0.3 : 0 }));
+      if (flag('png')) made.push(await R.renderPng(view, path.join(outDir, `${name}.png`), { at: at != null && !/,/.test(at) ? +at : null, scale: +val('scale', 2) }));
       for (const f of ['mp4', 'gif', 'webm']) if (flag(f)) made.push(await R.renderVideo(r.svg, path.join(outDir, `${name}.${f}`), { format: f, fps: +val('fps', 30), width: +val('width', 1280), loops: +val('loops', 1), intro: flag('intro') }));
     } catch (e) {
       console.log(`\n! Could not rasterise: ${e.message}`);
@@ -153,10 +163,19 @@ async function main() {
   const rel = (p) => path.relative(process.cwd(), p) || p;
   console.log(`\n✓ ${name}: ${r.width}×${r.height}, ${r.objects} objects, ${r.loop.toFixed(1)}s loop, ${(r.bytes / 1024).toFixed(0)} KB`);
   for (const p of made) console.log(`  ${rel(p)}`);
+  if (made.some((p) => p.endsWith('.svg'))) console.log(`  embed: <img src="${name}.svg" width="${r.width}" height="${r.height}" alt="…" style="max-width:100%;height:auto">${s.opts.size ? '' : '   (size: [w, h] in scene() keeps these numbers fixed between builds)'}`);
   const warns = r.notes.filter((n) => n.level === 'warn'), hints = r.notes.filter((n) => n.level === 'hint');
   if (warns.length) { console.log(`\nFIX THESE (${warns.length}):`); for (const n of warns) console.log(`  ✗ [${n.code}] ${n.msg}`); }
   if (hints.length) { console.log(`\nCONSIDER (${hints.length}):`); for (const n of hints) console.log(`  · [${n.code}] ${n.msg}`); }
   if (!warns.length && !hints.length) console.log('\nNo problems found by the checker.');
+  if (flag('motion')) {
+    // what moves, when, and which way: a check on direction and timing that needs no picture
+    const m = r.motion();
+    console.log('\nMOTION  (scene clock: 0 s is when the story starts. +x is toward the lower right of the picture, +y toward the lower left, +z up)');
+    if (m.timeline.length) { console.log('\n  Story'); for (const st of [...m.timeline].sort((p, q) => p.t0 - q.t0)) console.log(`    ${st.t0.toFixed(2).padStart(6)} – ${st.t1.toFixed(2).padEnd(6)} ${st.text}`); }
+    if (m.parts.length) { console.log('\n  Parts that move by themselves'); for (const line of m.parts) console.log(`  ${line}`); }
+    if (!m.timeline.length && !m.parts.length) console.log('  Nothing moves.');
+  }
   if (!wantsRaster) console.log('\nNext: look at the result. Add --sheet to get frames across the loop as one PNG.');
   if (flag('strict') && warns.length) process.exit(2);
 }

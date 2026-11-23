@@ -27,6 +27,8 @@ Tell the user which file to use where, and that the `.scene.mjs` is the editable
 <img src="/img/how-a-cache-works.svg" alt="A cache answering requests so the origin does not have to" width="640" height="500" style="max-width:100%;height:auto">
 ```
 
+The build prints this tag with the right numbers. By default the size follows the content, so it can change when the scene does; put `size: [640, 500]` in `scene()` to fix it, which keeps a page's layout steady across rebuilds and gives a set of illustrations one common shape.
+
 ```markdown
 ![How a cache speeds up a website](docs/how-a-cache-works.svg)
 ```

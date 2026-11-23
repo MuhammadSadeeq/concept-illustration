@@ -1,7 +1,7 @@
 // Parcels arrive on one belt and a turntable sends them down two lanes in turn: routing, load
 // balancing, an A/B split.
 // Pattern: a vignette with several moving parts on one shared clock. Each parcel is a group with
-// its own keyframed path; the second runs the same clock half a turn later (phase: 0.5). The
+// its own keyframed path; the second runs the same sequence half a period apart (phase: 0.5). The
 // turntable's arrow turns just before the parcel that needs it arrives, so cause comes first.
 export default ({ scene }) => {
   const s = scene({ look: 'sand', finish: 'soft', floor: 'none', title: 'One stream of parcels shared between two lanes', loop: 6, pad: 44 });

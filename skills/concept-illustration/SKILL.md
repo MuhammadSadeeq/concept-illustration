@@ -153,6 +153,7 @@ The accent colour belongs to the hero. Where a supporting object shows a lot of 
 ```
 
 - `at: [x, y]` is the centre of an object, in grid cells. A row along `x` runs from the upper-left of the picture to the lower-right, the way people read. Use `y` for parallel lanes.
+- **Turning is the one trap in these axes.** Going from +x round to +y is *clockwise* seen from above, the opposite of a maths textbook. Never work out a sense of rotation from the coordinates or a right-hand rule. Say it: `sense: 'cw'` or `'ccw'` on anything that spins or orbits means clockwise or anticlockwise *as it appears in the picture*, which for a circle on the floor is as seen from above. Then confirm it with `--motion`.
 - Centres **4 to 5 cells apart**; under 3 they collide. Linked objects share an `x` or a `y` so links run straight.
 - More than four in one row makes a long thin picture. Turn the row into an L or a U, or use two lanes, so the frame stays near 4:3 or 16:9.
 - **Three depths.** Tall or scenic things at the back (small `x + y`), the actors in the middle, low things and tokens in front. Nothing hides anything.
@@ -188,7 +189,7 @@ Draw only links that carry meaning. One link serves both directions. Ends may be
 | `s.pop(obj)` · `s.show(obj)` · `s.hide(obj)` | Reveal or remove (create with `hidden: true`) |
 | `s.grow(obj)` | Rise out of the floor. Create it with `level: 0`, which leaves it sunk out of sight. Suits flat-topped things (`bars`, `building`, `cylinder`, `cube`, `stack`); for anything else use `hidden: true` and `s.pop` |
 | `s.lift(obj, 0.5)` · `s.drop(obj)` | Raise and lower |
-| `s.say('…')` | Caption under the scene; stays until the next `say` |
+| `s.say('…')` | Caption under the scene; stays until the next `say`. `s.say('…', { at: 6 })` pins it to second 6 |
 | `s.wait(1)` | Hold |
 
 - **Cause, then effect.** A token arrives; then the receiver reacts.
@@ -197,6 +198,7 @@ Draw only links that carry meaning. One link serves both directions. Ends may be
 - **End on the result and hold it**: `mark`, `tint`, `pop` or `grow`, then `s.wait(1)`.
 - 6 to 14 steps, 3 to 5 captions under 60 characters, a loop of 6 to 12 seconds. Changes reset themselves at the loop.
 - Steady states need no story: `flow: true` on links and `float: true` on the hero.
+- **One clock.** Second 0 is the moment the story starts. Story steps, captions, moving parts, flows and the times printed on the review sheet all count from it. Any step takes `{ at: seconds }` to start at a fixed moment instead of after the step before; use that to keep captions in step with a machine that runs by itself (`s.say('The gate opens', { at: 2.7 })`).
 
 ### 8. Check the detail
 
@@ -206,7 +208,8 @@ The engine adds these by itself: a contact shadow and a cast shadow per object, 
 - Put the telling detail on the hero (a custom face, an icon, a `sub` label) and leave supporting objects plain.
 - Add `info: '…'` to the objects a viewer might want explained; it becomes a hover card in the interactive output.
 - For a small component in a card or a button-sized slot use `detail: 'clean'`, 2 to 4 objects and no captions.
-- `pad` is the margin around the content in pixels: one number, or `[sides, top-and-bottom]`. Widen it when a part swings or travels outside its object.
+- `pad` is the margin around the content in pixels: one number, or `[sides, top-and-bottom]`. The frame already follows parts that slide, orbit or spin.
+- `size: [640, 480]` fixes the image's width and height, so a rebuild never changes the space it takes on a page. Without it the size follows the content; the build prints the `<img>` tag to use either way.
 
 ### 9. Build, check, fix
 
@@ -215,12 +218,18 @@ node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --sheet                  # SVG
 node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --looks                  # the scene in six looks, to compare
 node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --experience step        # interactive page: 'loop' | 'step' | 'scroll'
 node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --png --at 3             # one still; also --mp4 --gif --webm
+node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --motion                 # print what moves, when and which way
+node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --sheet --frames 2.3,2.6 --trails --focus <id>   # those moments, with direction shown, close up
 ```
 
 - An error names the line of your script and suggests the fix.
 - Custom objects take every story step and option that built-in ones do (`hero`, `s.tint`, `s.grow`, `as:` in `s.send`).
 - **FIX THESE** are defects: resolve all. **CONSIDER** are judgement calls: act unless you have a reason.
 - The sheet shows the resting state first, then tokens in mid-flight and states just after they change (`--frames 12` for more). If you can view images, judge it against the quality bar. If you cannot, rely on the report and keep the scene simple.
+- **Check directions and timing; do not assume them.** The checker verifies layout, not meaning: it cannot know that a ring should lie flat or that a particle should go left.
+  - `--motion` prints the story's timeline and, for every part that moves by itself, where it is at each key moment and which way it goes in the picture. Read it against your visual sentence. It needs no image.
+  - `--trails` adds a faint trail behind everything that moves on the sheet, so a still frame shows direction. `--frames 2.3,2.6` picks the moments; `--focus <object id>` or `--focus x,y,z` with `--zoom 3` looks closely at one part.
+  - State the facts that must hold and let the build prove them: `s.expect(3, (at) => at('electron').x < 0, 'the electron is left of the nucleus at 3 s')`. A range checks every moment: `s.expect([0, 12], (at) => at('head').z > 0.5, 'the head never touches the platter')`. `at(name)` gives `{ x, y, z, opacity, angle }` for an object id or a shape given `name: '…'`. A false one is listed under FIX THESE with the values found.
 - Raster outputs need a browser engine (Playwright, Puppeteer or any Chrome); video also needs ffmpeg. Without them the SVG and pages are still written.
 
 ### 10. Deliver
@@ -236,7 +245,7 @@ The SVG animates in `<img>`, inline, in Markdown and in READMEs, and stops for p
 The best result is often something this file does not list. You are expected to go there.
 
 - **New objects.** `s.define` and `s.custom` build anything from shapes; `s.svg(markup, { at, w, h })` stands any drawing in the scene. Use them whenever the kit's nearest match would be a compromise. See [custom](references/custom.md).
-- **New motion.** Combine steps into behaviour the kit does not name: a queue that fills (`pop` hidden items as tokens arrive, `hide` them as they are taken), a machine that assembles (`grow` parts in turn), a handover (`move` an object between two places), a comparison (two zones running in parallel). Parts of your own objects can animate with `anim`: `blink`, `spin`, `march`, `ring` for details; `move`, `swing` and keyframed `keys` for parts that slide, lift, turn and wait.
+- **New motion.** Combine steps into behaviour the kit does not name: a queue that fills (`pop` hidden items as tokens arrive, `hide` them as they are taken), a machine that assembles (`grow` parts in turn), a handover (`move` an object between two places), a comparison (two zones running in parallel). Parts of your own objects can animate with `anim`: `blink`, `spin`, `march`, `ring` for details; `move`, `swing`, `orbit` and keyframed `keys` for parts that slide, lift, turn and wait. Ready-made pieces cover what scenes most often need: `sh.stream` (many particles on a path: charge in a wire, water in a pipe, air carrying sound), `sh.arrow` (a force or a direction), `sh.ripple` (rings spreading on a plane), and `bar` and `readout` artwork for gauges and counters that change over time.
 - **Experiences, not only loops.** `--experience step` lets a reader walk through the story one caption at a time; `scroll` ties the story to the page scroll; every object with `info` answers a hover or tap. Use them for teaching, onboarding and product tours. See [delivery](references/delivery.md).
 - **Mechanisms.** When how a thing works is the idea, build the thing and let its parts act it out: see [Vignettes](#vignettes).
 - **Working models.** For science and engineering (a generator, a pump, an engine, a heart), combine the two: a custom machine whose parts really turn and slide, placed in a labelled scene with links, captions and `s.callout` naming its parts. Everything that follows one cause shares one clock. Study `examples/ac-generator.scene.mjs`.
@@ -272,7 +281,7 @@ export default ({ scene }) => {
 ```
 
 - Choose a mechanism the viewer knows from the physical world, and reduce it to two to five parts.
-- One clock: give every moving part the same `period` (the scene's `loop`), and offset with `phase` or with where its keys sit. Something must visibly cause each movement.
+- One clock: give every moving part the same `period` (the scene's `loop`), and offset with where its keys sit, with `delay` (seconds later) or with `phase` (a fraction of the period already done, so the part runs ahead). Something must visibly cause each movement.
 - Let it breathe: wait, move with weight (`ease: 'in'` to fall, `'out'` to settle, `'back'` to overshoot), hold the result, return.
 - One colour for the part that matters; everything else neutral. The `studio` look with its `line` finish was made for this; `sand`, `mint` and the dark looks work as well.
 - Study `examples/approval-press.scene.mjs`, `examples/parcel-sorter.scene.mjs` and `examples/lighthouse.scene.mjs`, and read [custom](references/custom.md#moving-parts) for every motion type.
@@ -290,6 +299,7 @@ Before you hand it over, every line must be true:
 - Links run straight or turn once. None passes under an object.
 - The story has a beginning, a change and a result, and the result is held before the loop restarts. In a vignette, every movement has a visible cause.
 - Colour means something: neutral for context, accent for the hero, `ok` / `warn` / `danger` for a state or for an actor that is itself good, risky or harmful.
+- Every direction and every caption's timing has been checked with `--motion`, `--trails` or `s.expect`, not assumed.
 - The build report shows nothing under FIX THESE.
 
 ## Mistakes to avoid
