@@ -3,7 +3,7 @@
 
 import { scene as makeScene } from './scene.mjs';
 
-const SCENE_KEYS = ['theme', 'accent', 'accent2', 'bg', 'background', 'grid', 'title', 'desc', 'heading', 'subheading', 'loop', 'intro', 'pad', 'aspect', 'id', 'font', 'shadows'];
+const SCENE_KEYS = ['look', 'theme', 'palette', 'finish', 'floor', 'accent', 'accent2', 'bg', 'background', 'grid', 'title', 'desc', 'heading', 'subheading', 'loop', 'intro', 'pad', 'aspect', 'id', 'font', 'shadows', 'haze', 'vignette', 'detail'];
 const META_KEYS = ['kind', 'say', 'emits', 'mark'];
 
 const sceneOpts = (cfg) => Object.fromEntries(Object.entries(cfg).filter(([k]) => SCENE_KEYS.includes(k)));

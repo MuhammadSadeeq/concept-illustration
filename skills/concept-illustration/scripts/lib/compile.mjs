@@ -2,7 +2,7 @@
 
 import {
   UNIT, SPHERE_K, proj, projP, r1, r2, depthSort, aabbScreen, aabbUnion, aabbShift, aabbIntersects,
-  bbox2, unionBox, growBox, boxesOverlap, rectOutline, circleOutline, polyPath, textWidth, esc, planeMatrix,
+  bbox2, unionBox, growBox, boxesOverlap, rectOutline, circleOutline, polyPath, textWidth, esc, planeMatrix, PLANES,
 } from './geom.mjs';
 import { material } from './themes.mjs';
 import { KIT, PACKETS } from './kit.mjs';
@@ -61,7 +61,7 @@ export function compile(sc) {
       if (sameEnd(lk.a, st.from) && sameEnd(lk.b, st.to)) return lk.path;
       if (sameEnd(lk.a, st.to) && sameEnd(lk.b, st.from)) return reversePath(lk.path);
     }
-    if (st.from.obj && st.to.obj) note('hint', 'send-no-link', `send(${st.from.obj.id} → ${st.to.obj.id}) has no link between the two objects, so the token crosses open floor. Add s.link(${st.from.obj.id}, ${st.to.obj.id}) so viewers see the route.`);
+    if (st.from.obj && st.to.obj) note('hint', 'send-no-link', `send(${st.from.obj.id} → ${st.to.obj.id}) has no link between the two objects, so the token crosses open floor. Add s.link(${st.from.obj.id}, ${st.to.obj.id}) so viewers see the route (steer it around other objects with route or via), or drop this step.`);
     return sc._route(st.from, st.to, {});
   };
   const track = (ob, name, prop, init) => ob.tracks[name] || (ob.tracks[name] = new Track(prop, init));
@@ -73,13 +73,15 @@ export function compile(sc) {
 
   if (sc.steps) {
     const durOf = (st) => {
+      if (st.type === 'move') { const cur = st.obj; return clamp(Math.hypot(st.to[0] - cur.x, st.to[1] - cur.y) / (st.speed ?? speed), 0.5, 2.6); }
       if (st.type !== 'send') return undefined;
       st._path = pathFor(st);
       const n = st.count ?? 1;
       return clamp(st._path.total / (st.speed ?? speed), 0.6, 2.6) + (n - 1) * (st.stagger ?? 0.22);
     };
-    const { items, end } = schedule(sc.steps, 0.35, sc.storyOpts.gap ?? 0.12, durOf);
-    T = Math.max(end + (sc.storyOpts.hold ?? 0.9), o.loop ?? 0);
+    const { items, end, read } = schedule(sc.steps, 0.35, sc.storyOpts.gap ?? 0.12, durOf);
+    // the last caption also gets its reading time before the loop restarts
+    T = Math.max(end + (sc.storyOpts.hold ?? 0.9), read.since + read.need + 0.6, o.loop ?? 0);
     T = Math.ceil(T * 10) / 10;
     for (const st of items) {
       const ob = st.obj;
@@ -131,6 +133,11 @@ export function compile(sc) {
           ob.marks.push(mk);
           break;
         }
+        case 'move': {
+          const [ax, ay] = proj(ob.x, ob.y, ob.z), [bx, by] = proj(st.to[0], st.to[1], ob.z + (st.to[2] || 0));
+          track(ob, 'move', 'translate', [0, 0]).to(st.t0, st.t1, [bx - ax, by - ay], st.ease || 'inOut');
+          break;
+        }
         case 'grow': {
           const full = ob.h * UNIT;
           track(ob, 'grow', 'translate', [0, (1 - ob.level) * full]).to(st.t0, st.t1, [0, (1 - st.to) * full], 'inOut');
@@ -168,20 +175,68 @@ export function compile(sc) {
     mat: (c) => material(th, c || 'body'),
     def,
     clipId: (k) => `${uid}-${k}`,
-    animStyle(a) {
+    // flat: the animated thing is artwork on a plane (units are cells in that plane);
+    // otherwise it is a shape in space (moves are [dx, dy, dz] in cells and are projected).
+    animStyle(a, flat = true) {
+      const shift = (m) => (flat ? [(m[0] || 0), (m[1] || 0)] : proj(m[0] || 0, m[1] || 0, m[2] || 0));
+      const tf = (k) => {
+        const parts = [];
+        if (k.move) { const [x, y] = shift(k.move); parts.push(`translate(${r2(x)}px,${r2(y)}px)`); }
+        if (k.rotate != null) parts.push(`rotate(${r2(k.rotate)}deg)`);
+        if (k.scale != null) parts.push(`scale(${r2(k.scale)})`);
+        return `${parts.length ? `transform:${parts.join(' ')}` : 'transform:none'}${k.opacity != null ? `;opacity:${r2(k.opacity)}` : ''}`;
+      };
       switch (a.type) {
+        case 'move': case 'swing': {
+          // there and back again, resting at each end
+          const P = snapPeriod(a.period || 3, T), h = clamp(a.hold ?? 0.15, 0, 0.45) * 50;
+          const A = a.type === 'move' ? { move: [0, 0, 0] } : { rotate: a.from ?? -20 };
+          const B = a.type === 'move' ? { move: a.by || [0, 0, 0.5] } : { rotate: a.to ?? 20 };
+          const e = `;animation-timing-function:${EASE[a.ease] || EASE.inOut}`;
+          return loopStyle(`0%{${tf(A)}}${r2(h)}%{${tf(A)}${e}}50%{${tf(B)}}${r2(50 + h)}%{${tf(B)}${e}}100%{${tf(A)}}`, { period: P, delay: -(a.phase || 0) * P });
+        }
+        case 'keys': {
+          // a keyframed sequence: keys: [{ at: 0..1, move, rotate, scale, opacity, ease }]
+          const P = snapPeriod(a.period || 4, T);
+          const ks = [...(a.keys || [])].sort((x, y) => x.at - y.at);
+          if (!ks.length) return '';
+          if (ks[0].at > 0) ks.unshift({ ...ks[0], at: 0 });
+          if (ks[ks.length - 1].at < 1) ks.push({ ...ks[0], at: 1 });
+          return loopStyle(ks.map((k) => `${r2(clamp(k.at, 0, 1) * 100)}%{${tf(k)};animation-timing-function:${EASE[k.ease] || EASE.inOut}}`).join(''), { period: P, delay: -(a.phase || 0) * P });
+        }
         case 'blink': {
           const P = snapPeriod(a.period || 2.4, T);
           return loopStyle(`0%,100%{opacity:1}50%{opacity:${a.min ?? 0.25}}`, { period: P, delay: -(a.phase || 0) * P, ease: 'ease-in-out' });
         }
         case 'spin': return loopStyle(`to{transform:rotate(${a.dir === -1 ? -360 : 360}deg)}`, { period: snapPeriod(a.period || 8, T) });
-        case 'march': return loopStyle(`to{stroke-dashoffset:${-a.len}}`, { period: snapPeriod(a.period || 1.2, T) });
+        case 'march': {
+          // alternate: the dashes rock back and forth like alternating current, still at each turn
+          if (a.alternate) { const P = snapPeriod(a.period || 2, T); return `animation:${kf(`from{stroke-dashoffset:${r2(a.len / 2)}}to{stroke-dashoffset:${r2(-a.len / 2)}}`)} ${r2(P / 2)}s ${EASE.sine} ${r2(-(a.phase || 0) * P)}s infinite alternate both`; }
+          return loopStyle(`to{stroke-dashoffset:${-a.len}}`, { period: snapPeriod(a.period || 1.2, T) });
+        }
         case 'ring': {
           const P = snapPeriod(a.period || 2.4, T);
           return loopStyle(`0%{transform:scale(.3);opacity:0}15%{opacity:.9}100%{transform:scale(1.25);opacity:0}`, { period: P, delay: -(a.phase || 0) * P, ease: 'ease-out' });
         }
         default: return '';
       }
+    },
+    /**
+     * Carry a shape round a circle about an axis without turning the shape itself:
+     * translate by M·R(θ)·(r, 0), built from two opposite spins so the path is an exact ellipse.
+     */
+    orbit(a, centre, inner) {
+      const plane = a.plane || { x: 'right', y: 'left', z: 'top' }[a.axis || 'x'] || 'right';
+      const Pl = PLANES[plane];
+      const [ax, ay] = proj(Pl.U[0], Pl.U[1], Pl.U[2]);
+      const [bx, by] = proj(Pl.V[0], Pl.V[1], Pl.V[2]);
+      const det = ax * by - bx * ay;
+      const f6 = (v) => +v.toFixed(6);
+      const inv = [by / det, -ay / det, -bx / det, ax / det].map(f6).join(' ');
+      const [cx, cy] = projP(centre);
+      const P = snapPeriod(a.period || 4, T), dir = a.dir === -1 ? -1 : 1, a0 = r2(a.from || 0);
+      const turn = (sign) => loopStyle(`to{transform:rotate(${sign * dir * 360}deg)}`, { period: P });
+      return `<g transform="translate(${r2(cx)} ${r2(cy)}) matrix(${f6(ax)} ${f6(ay)} ${f6(bx)} ${f6(by)} 0 0) rotate(${a0})"><g style="${turn(1)}"><g transform="translate(${r2(a.r ?? 0.5)} 0)"><g style="${turn(-1)}"><g transform="rotate(${-a0}) matrix(${inv} 0 0) translate(${r2(-cx)} ${r2(-cy)})">${inner}</g></g></g></g></g>`;
     },
   };
 
@@ -197,6 +252,38 @@ export function compile(sc) {
   // ================================================================ 3. floor layer
 
   let floor = '', floorFx = '', world = [], air = '', overlay = '';
+
+  const rich = o.detail !== 'clean';
+  // extent of everything standing on the floor
+  let ext = null;
+  for (const ob of sc.objs) if (!ob.parent) ext = unionBox(ext, { x0: ob.x - ob.w / 2, y0: ob.y - ob.d / 2, x1: ob.x + ob.w / 2, y1: ob.y + ob.d / 2 });
+  for (const lk of sc.links) if (!lk.path.arc) for (const f of lk.path.flat) ext = unionBox(ext, { x0: f.p[0], y0: f.p[1], x1: f.p[0], y1: f.p[1] });
+  for (const zn of sc.zones) ext = unionBox(ext, { x0: zn.x0, y0: zn.y0, x1: zn.x1, y1: zn.y1 });
+
+  // --- a base plate turns the scene into a diorama standing on one raised slab
+  if (th.floor.plate && ext && o.floor !== false) {
+    const m = 1.15, T = 0.34;
+    const w = ext.x1 - ext.x0 + m * 2, d = ext.y1 - ext.y0 + m * 2, cx = (ext.x0 + ext.x1) / 2, cy = (ext.y0 + ext.y1) / 2;
+    const pts = rectOutline(w, d, Math.min(1, w / 5, d / 5), cx, cy);
+    if (o.shadows) floor += `<path d="${polyPath(pts.map(([x, y]) => proj(x + 0.55, y - 0.15, -T)))}" fill="${th.shadow.color}" fill-opacity="${r2(th.shadow.alpha * 0.75)}" filter="url(#${blurFilter(16)})"/>`;
+    floor += renderPrism(ctx, { plane: 'top', o: [0, 0, -T], pts, depth: T, color: 'floor', ao: false });
+    // faint tile lines on the slab, kept clear of its rounded edge
+    let d2 = '';
+    for (let x = Math.ceil(ext.x0 - m + 0.8); x <= ext.x1 + m - 0.8; x++) { const a = proj(x, ext.y0 - m + 0.5), b = proj(x, ext.y1 + m - 0.5); d2 += `M${r1(a[0])} ${r1(a[1])}L${r1(b[0])} ${r1(b[1])}`; }
+    for (let y = Math.ceil(ext.y0 - m + 0.8); y <= ext.y1 + m - 0.8; y++) { const a = proj(ext.x0 - m + 0.5, y), b = proj(ext.x1 + m - 0.5, y); d2 += `M${r1(a[0])} ${r1(a[1])}L${r1(b[0])} ${r1(b[1])}`; }
+    floor += `<path d="${d2}" fill="none" stroke="${th.floor.color}" stroke-opacity="${r2(th.floor.alpha * 0.55)}" stroke-width="1"/>`;
+    grow(growBox(bbox2(pts.map(([x, y]) => proj(x, y, -T))), 14));
+    grow(bbox2(pts.map(([x, y]) => proj(x, y, 0))));
+  }
+  // --- concentric rings spreading from the middle of the scene
+  if (th.floor.rings && ext && o.floor !== false) {
+    const [rx0, ry0] = proj((ext.x0 + ext.x1) / 2, (ext.y0 + ext.y1) / 2, 0);
+    const reachR = Math.hypot(ext.x1 - ext.x0, ext.y1 - ext.y0) / 2 + 2.5;
+    for (let r = 1.5, i = 0; r <= reachR; r += 1.5, i++) {
+      const fade = 1 - r / (reachR + 1.5);
+      floor += `<ellipse cx="${r1(rx0)}" cy="${r1(ry0)}" rx="${r1(r * UNIT * SPHERE_K)}" ry="${r1(r * UNIT * 0.7071)}" fill="none" stroke="${th.floor.color}" stroke-opacity="${r2(th.floor.alpha * 1.5 * fade)}" stroke-width="${i % 2 ? 1 : 1.4}"${i % 2 ? ' stroke-dasharray="3 7"' : ''}/>`;
+    }
+  }
 
   // --- zones
   for (const zn of sc.zones) {
@@ -241,6 +328,16 @@ export function compile(sc) {
   const hiddenAttr = (ob) => (ob.hidden ? ' opacity="0"' : '');
 
   const shadowOf = (ob) => {
+    if (ob.opts.ghost) {
+      // a ghost stands for something absent or still to come: no shadow, a dashed footprint instead
+      const gw = ob.res.w * ob.k + 0.3, gd = ob.res.d * ob.k + 0.3;
+      const ol = ob.res.round ? circleOutline(1, 0, 0, 28).map(([a, b]) => [(a * gw) / 2, (b * gd) / 2]) : rectOutline(gw, gd, Math.min(0.24, gw / 3, gd / 3));
+      const [gx, gy] = proj(ob.x, ob.y, ob.parent ? ob.z : 0);
+      let mark = `<path d="${polyPath(ol.map(([a, b]) => proj(a, b, 0)))}" fill="none" stroke="${th.text.color}" stroke-opacity="0.5" stroke-width="1.2" stroke-dasharray="4 4" stroke-linecap="round"/>`;
+      mark = wrap(mark, opacityStyle(ob), hiddenAttr(ob));
+      if (ob.tracks.move) mark = wrap(mark, trackStyle(ob.tracks.move));
+      return `<g transform="translate(${r1(gx)} ${r1(gy)})">${mark}</g>`;
+    }
     if (!o.shadows || th.shadow.kind === 'none' || ob.opts.shadow === false) return '';
     const sh = ob.res.shadow || {};
     const k = ob.k;
@@ -249,26 +346,40 @@ export function compile(sc) {
     const baseZ = ob.parent ? ob.z : 0;
     const round = sh.r != null || sh.round || (ob.res.round && sh.w == null);
     const sw = (sh.w ?? ob.res.w) * k, sd = (sh.d ?? ob.res.d) * k;
-    let outline = round ? (sh.r != null ? circleOutline(sh.r * k, 0, 0, 28) : circleOutline(1, 0, 0, 28).map(([a, b]) => [(a * sw) / 2, (b * sd) / 2])) : rectOutline(sw, sd, Math.min(0.18, sw / 3, sd / 3));
+    const outlines = sh.rects
+      ? sh.rects.map((q) => rectOutline((q.x1 - q.x0) * k, (q.y1 - q.y0) * k, Math.min(0.18, ((q.x1 - q.x0) * k) / 3, ((q.y1 - q.y0) * k) / 3), ((q.x0 + q.x1) / 2) * k, ((q.y0 + q.y1) / 2) * k))
+      : [round ? (sh.r != null ? circleOutline(sh.r * k, 0, 0, 28) : circleOutline(1, 0, 0, 28).map(([a, b]) => [(a * sw) / 2, (b * sd) / 2])) : rectOutline(sw, sd, Math.min(0.18, sw / 3, sd / 3))];
+    // every outline is grown about its own centre, so separate pieces stay separate
+    const shape = (g, dx = 0, dy = 0) => outlines.map((ol) => {
+      const cx = ol.reduce((t, q) => t + q[0], 0) / ol.length, cy = ol.reduce((t, q) => t + q[1], 0) / ol.length;
+      return polyPath(ol.map(([a, b]) => proj(cx + (a - cx) * g + dx, cy + (b - cy) * g + dy, 0)));
+    }).join('');
     let body;
     if (th.shadow.kind === 'cast' && !soft && !ob.parent) {
       const hh = Math.min(ob.h, 2.6);
       const dx = 0.5 * hh, dy = -0.26 * hh;
-      const pts = hull([...outline, ...outline.map(([a, b]) => [a + dx, b + dy])]);
-      body = `<path d="${polyPath(pts.map(([a, b]) => proj(a, b, 0)))}" fill="${th.shadow.color}" fill-opacity="${th.shadow.alpha}"/>`;
+      const thrown = outlines.map((ol) => polyPath(hull([...ol, ...ol.map(([a, b]) => [a + dx, b + dy])]).map(([a, b]) => proj(a, b, 0)))).join('');
+      body = `<path d="${thrown}" fill="${th.shadow.color}" fill-opacity="${th.shadow.alpha}"/>`;
+      body += `<path d="${shape(1.04)}" fill="${th.shadow.color}" fill-opacity="${r2(th.shadow.alpha * 0.7)}" filter="url(#${blurFilter(2)})"/>`;
+    } else if (ob.parent || soft) {
+      const g = ob.parent ? 1.03 : 0.92;
+      const blur = ob.parent ? 2 : th.shadow.kind === 'cast' ? 6 : th.shadow.blur * 1.35;
+      const alpha = ob.parent ? th.shadow.alpha : (th.shadow.kind === 'cast' ? 0.3 : th.shadow.alpha) * 0.6;
+      body = `<path d="${shape(g)}" fill="${th.shadow.color}" fill-opacity="${r2(alpha)}" filter="url(#${blurFilter(blur)})"/>`;
     } else {
-      const g = ob.parent ? 1.03 : soft ? 0.92 : 1.1;
-      const off = ob.parent || soft ? [0, 0] : [0.1 + Math.min(ob.h, 2) * 0.05, -0.05];
-      const blur = ob.parent ? 2 : th.shadow.kind === 'cast' ? 6 : th.shadow.blur * (soft ? 1.35 : 1);
-      const alpha = (th.shadow.kind === 'cast' ? 0.3 : th.shadow.alpha) * (soft ? 0.6 : 1);
-      const pts = outline.map(([a, b]) => proj(a * g + off[0], b * g + off[1], 0));
-      body = `<path d="${polyPath(pts)}" fill="${th.shadow.color}" fill-opacity="${r2(alpha)}" filter="url(#${blurFilter(blur)})"/>`;
+      // Two layers read as real light: a tight dark contact shadow where the object meets the
+      // floor, and a wider, softer one thrown away from the light that grows with height.
+      const hh = Math.min(sh.rects ? Math.min(ob.h, 0.9) : ob.h, 2.8), reach = th.shadow.reach ?? 1;
+      const off = [(0.12 + hh * 0.2) * reach, -(0.04 + hh * 0.07) * reach];
+      body = `<path d="${shape(1.12, off[0], off[1])}" fill="${th.shadow.color}" fill-opacity="${r2(th.shadow.alpha * 0.55)}" filter="url(#${blurFilter(r1(th.shadow.blur * (1 + hh * 0.18)))})"/>`
+        + `<path d="${shape(1.04, 0.03, 0)}" fill="${th.shadow.color}" fill-opacity="${r2(Math.min(0.75, th.shadow.alpha * 0.95))}" filter="url(#${blurFilter(2.2)})"/>`;
     }
     const [sx, sy] = proj(ob.x, ob.y, baseZ);
     const fl = floatStyleOf.get(ob);
     let inner = wrap(body, fl ? fl.shadow : '');
     inner = wrap(inner, opacityStyle(ob), hiddenAttr(ob));
-    grow(growBox(bbox2([[sx - sw * UNIT, sy - sd * UNIT * 0.5], [sx + sw * UNIT, sy + sd * UNIT * 0.5]]), 6));
+    if (ob.tracks.move) inner = wrap(inner, trackStyle(ob.tracks.move));
+    grow(growBox(bbox2([[sx - sw * UNIT, sy - sd * UNIT * 0.5], [sx + (sw + Math.min(ob.h, 2.8) * 0.3) * UNIT, sy + sd * UNIT * 0.5]]), 6));
     return `<g transform="translate(${r1(sx)} ${r1(sy)})">${inner}</g>`;
   };
 
@@ -286,6 +397,21 @@ export function compile(sc) {
       const el = `<ellipse cx="${r1(gx)}" cy="${r1(gy)}" rx="${r1(R * UNIT * SPHERE_K)}" ry="${r1(R * UNIT * 0.7071)}" fill="url(#${glowGrad(color, strength)})"/>`;
       const tr = ob.tracks.glow;
       glowLayer += wrap(wrap(el, tr ? trackStyle(tr) : '', tr && tr.initial === 0 ? ' opacity="0"' : ''), opacityStyle(ob), hiddenAttr(ob));
+    }
+  }
+
+  // --- a few motes of light drifting up around the hero (only where the look has glow)
+  let motes = '';
+  if (rich && th.glow >= 0.45) {
+    for (const ob of sc.objs.filter((b) => b.hero && !b.hidden).slice(0, 1)) {
+      const color = mix(K.hex(ob.opts.color !== 'body' ? ob.opts.color : ob.opts.accent), '#ffffff', 0.45);
+      const P = snapPeriod(4.2, T);
+      for (let i = 0; i < 7; i++) {
+        const a = i * 2.399, rr = (0.45 + ((i * 37) % 10) / 10 * 0.75) * Math.max(ob.w, ob.d);
+        const [px, py] = proj(ob.x + Math.cos(a) * rr, ob.y + Math.sin(a) * rr, ob.z + 0.2 + ((i * 53) % 10) / 10 * ob.h * 0.6);
+        const rise = 26 + ((i * 29) % 10) * 2.2;
+        motes += `<circle cx="${r1(px)}" cy="${r1(py)}" r="${i % 3 === 0 ? 1.9 : 1.3}" fill="${color}" opacity="0" style="${loopStyle(`0%{transform:translateY(0);opacity:0}18%{opacity:.85}100%{transform:translateY(${-rise}px);opacity:0}`, { period: P, delay: -(i / 7) * P, ease: 'ease-out' })}"/>`;
+      }
     }
   }
 
@@ -334,12 +460,29 @@ export function compile(sc) {
       svg += `<path d="${d}" fill="none" stroke="${mix(color, th.shadow.color, 0.55)}" stroke-width="${width * 5.2}" stroke-linecap="round" stroke-linejoin="round" opacity="${alpha}"/><path d="${d}" fill="none" stroke="${color}" stroke-width="${width * 3.4}" stroke-linecap="round" stroke-linejoin="round" opacity="${alpha}"/><path d="${d}" fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="${width * 0.9}" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 ${-width * 0.9})"/>`;
     } else {
       if (th.glow > 0 && !lo.dim) svg += `<path d="${d}" fill="none" stroke="${color}" stroke-opacity="${r2(th.glow * 0.22)}" stroke-width="${width * 4.5}" stroke-linecap="round" stroke-linejoin="round"/>`;
-      svg += `<path d="${d}" fill="none" stroke="${color}" stroke-opacity="${r2(alpha)}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"${dashArr ? ` stroke-dasharray="${dashArr}"` : ''}${style ? ` style="${style}"` : ''}/>`;
+      // solid links draw themselves from source to target as the scene arrives
+      const draw = !dashArr && o.intro ? ` pathLength="1" stroke-dasharray="1" style="animation:${kf('from{stroke-dashoffset:1}to{stroke-dashoffset:0}')} .7s ${EASE.inOut} ${r2(0.25 + li * 0.08)}s both"` : '';
+      svg += `<path d="${d}" fill="none" stroke="${color}" stroke-opacity="${r2(alpha)}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"${dashArr ? ` stroke-dasharray="${dashArr}"` : ''}${style ? ` style="${style}"` : ''}${draw}/>`;
     }
     svg += arrow ? `<g opacity="${r2(alpha)}">${arrow}</g>` : '';
     // travelling dots for a continuous flow
     let dots = '';
-    if (flow) {
+    if (flow === 'alternate' || (flow && flow.alternate)) {
+      // alternating flow: every dot rocks back and forth about its own place, all in step
+      const fo = typeof flow === 'object' ? flow : {};
+      const P = snapPeriod(fo.period ?? 2, T);
+      const count = fo.count ?? Math.max(2, Math.round(path.total / 0.8));
+      const amp = (fo.swing ?? 0.3) / path.total, ph = (fo.phase || 0) * 2 * Math.PI;
+      const dotColor = fo.color ? K.hex(fo.color) : th.glow > 0 ? mix(color, '#ffffff', 0.35) : K.hex('accent');
+      for (let i = 0; i < count; i++) {
+        const f0 = (i + 0.5) / count, N = 16;
+        const at = (t) => projP(pointAt(path, clamp(f0 - amp * Math.cos(2 * Math.PI * t + ph), 0, 1)));
+        const css = keyframes('translate', Array.from({ length: N + 1 }, (_, j) => [(j / N) * P, at(j / N)]), P);
+        const pos = at(0);
+        const glowDot = th.glow > 0 ? `<circle r="7" fill="url(#${glowGrad(dotColor, 0.7)})"/>` : '';
+        dots += `<g transform="translate(${r1(pos[0])} ${r1(pos[1])})" style="${loopStyle(css, { period: P })}">${glowDot}<circle r="2.6" fill="${dotColor}"${th.outline ? ` stroke="${th.ink}" stroke-width="1"` : ''}/></g>`;
+      }
+    } else if (flow) {
       const fo = typeof flow === 'object' ? flow : {};
       const count = fo.count ?? Math.max(1, Math.round(path.total / 2.6));
       const P = snapPeriod(path.total / (fo.speed ?? 2.4), T);
@@ -353,6 +496,10 @@ export function compile(sc) {
         const glowDot = th.glow > 0 ? `<circle r="9" fill="url(#${glowGrad(dotColor, 0.8)})"/>` : '';
         dots += `<g transform="translate(${r1(pos[0])} ${r1(pos[1])})" style="${join(loopStyle(css, { period: P, delay }), loopStyle(fade, { period: P, delay }))}">${glowDot}<circle r="${lo.style === 'pipe' ? 4 : 3.2}" fill="${dotColor}"${th.outline ? ` stroke="${th.ink}" stroke-width="1.2"` : ''}/></g>`;
       }
+    }
+    if (rich && !path.arc && lk.a.obj && lo.style !== 'road' && lo.style !== 'pipe' && lo.arrow !== 'both') {
+      const [qx, qy] = projP(flat[0].p);
+      svg += `<ellipse cx="${r1(qx)}" cy="${r1(qy)}" rx="4.6" ry="2.7" fill="${th.text.halo}" stroke="${color}" stroke-opacity="${r2(alpha)}" stroke-width="${Math.max(1.4, width * 0.8)}"/>`;
     }
     if (path.arc) air += svg + dots; else { linkLayer += svg; floorFx += dots; }
     grow(growBox(bbox2(flat.map((f) => projP(f.p))), 10));
@@ -393,7 +540,7 @@ export function compile(sc) {
   for (const ob of sc.objs) {
     let inner = renderParts(ob.parts);
     for (const tint of ob.tints) {
-      const res = KIT[ob.kind].build({ ...ob.opts, color: tint.color, accent: ob.opts.accent === tint.color ? 'paper' : ob.opts.accent }, K);
+      const res = (sc.kinds[ob.kind] || KIT[ob.kind]).build({ ...ob.opts, color: tint.color, accent: ob.opts.accent === tint.color ? 'paper' : ob.opts.accent }, K);
       inner += `<g opacity="0" style="${trackStyle(tint.track)}">${renderParts(ob.k === 1 ? res.parts : sc.scaleParts(res.parts, ob.k))}</g>`;
     }
     if (ob.level < 1 || ob.tracks.grow) {
@@ -409,21 +556,27 @@ export function compile(sc) {
       const off = (1 - ob.level) * ob.h * UNIT;
       inner = `<g clip-path="url(#${clip})"><g${off ? ` transform="translate(0 ${r1(off)})"` : ''}${ob.tracks.grow ? ` style="${trackStyle(ob.tracks.grow)}"` : ''}>${inner}</g></g>`;
     }
+    const fade = ob.opts.ghost ? 0.28 : ob.opts.opacity;
+    if (fade != null && fade < 1) inner = `<g opacity="${r2(clamp(fade, 0, 1))}">${inner}</g>`;
     inner = wrap(inner, opacityStyle(ob), hiddenAttr(ob));
     if (ob.tracks.scale) inner = wrap(inner, trackStyle(ob.tracks.scale));
     const fl = floatStyleOf.get(ob);
     if (fl) inner = wrap(inner, fl.obj);
     if (ob.tracks.shake) inner = wrap(inner, trackStyle(ob.tracks.shake));
     if (ob.tracks.lift) inner = wrap(inner, trackStyle(ob.tracks.lift));
+    if (ob.tracks.move) inner = wrap(inner, trackStyle(ob.tracks.move));
     inner = wrap(inner, introStyle(ob));
     const [sx, sy] = proj(ob.x, ob.y, ob.z);
-    const svg = `${stackedShadow.get(ob) || ''}<g transform="translate(${r1(sx)} ${r1(sy)})">${inner}</g>`;
+    const sbx = aabbScreen(ob.box);
+    const meta = ` data-obj="${esc(ob.id)}"${ob.label ? ` data-label="${esc(ob.label)}"` : ''}${ob.opts.info ? ` data-info="${esc(ob.opts.info)}"` : ''} data-box="${r1(sbx.x0)} ${r1(sbx.y0)} ${r1(sbx.x1)} ${r1(sbx.y1)}"`;
+    const svg = `${stackedShadow.get(ob) || ''}<g transform="translate(${r1(sx)} ${r1(sy)})"${meta}>${inner}</g>`;
     let box = ob.box;
     if (ob.float) box = { ...box, z1: box.z1 + 0.2 };
     world.push({ aabb: box, svg, ob });
     const sb = aabbScreen(box);
     const liftPx = ob.tracks.lift ? Math.max(0, ...ob.tracks.lift.segs.map((s) => -s.to[1])) : 0;
     grow({ x0: sb.x0, x1: sb.x1, y0: sb.y0 - liftPx - (ob.float ? 8 : 0), y1: sb.y1 });
+    if (ob.tracks.move) for (const sg of ob.tracks.move.segs) grow({ x0: sb.x0 + sg.to[0], x1: sb.x1 + sg.to[0], y0: sb.y0 + sg.to[1], y1: sb.y1 + sg.to[1] });
   }
 
   // --- story tokens: one copy per straight run of the route, so each sorts correctly among the objects
@@ -434,12 +587,13 @@ export function compile(sc) {
     mv.until = next ? next.t0 : T - 0.45;
   });
   const kitToken = (mv) => {
-    const res = KIT[mv.as].build({ color: mv.color === 'accent' ? 'body' : mv.color, accent: 'accent' }, K);
+    const res = (sc.kinds[mv.as] || KIT[mv.as]).build({ color: mv.color === 'accent' ? 'body' : mv.color, accent: 'accent' }, K);
     const k = mv.scale ?? 0.5;
     return { parts: sc.scaleParts(res.parts, k), shadow: Math.max(res.w, res.d) * k * 0.45 };
   };
   movers.forEach((mv, mi) => {
-    let pk = PACKETS[mv.as] ? PACKETS[mv.as](mv.color, K) : KIT[mv.as] ? kitToken(mv) : PACKETS.dot(mv.color, K);
+    const isKind = !PACKETS[mv.as] && (sc.kinds[mv.as] || KIT[mv.as]);
+    let pk = PACKETS[mv.as] ? PACKETS[mv.as](mv.color, K) : isKind ? kitToken(mv) : PACKETS.dot(mv.color, K);
     if (PACKETS[mv.as] && mv.scale && mv.scale !== 1) pk = { ...pk, parts: sc.scaleParts(pk.parts, mv.scale), shadow: pk.shadow * mv.scale, glowZ: pk.glowZ != null ? pk.glowZ * mv.scale : undefined };
     const partsSvg = renderParts(pk.parts);
     let local = null;
@@ -474,7 +628,10 @@ export function compile(sc) {
     const staticF = 0.3 + 0.2 * (mi % 3);
     const staticPos = projP(pointAt(path, staticF));
     const glowSvg = pk.glow && th.glow > 0 ? `<circle cy="${-(pk.glowZ ?? 0.16) * UNIT}" r="${r1(24 * (PACKETS[mv.as] && mv.scale ? mv.scale : 1))}" fill="url(#${glowGrad(K.hex(mv.color), 0.9)})"/>` : '';
-    const body = glowSvg + partsSvg;
+    // a token swells as it is emitted and shrinks as it is absorbed, so hand-offs feel physical
+    const endScale = mv.until != null ? 1 : 0.5;
+    const swell = keyframes('scale', [[0, 0.35], [mv.t0, 0.35, 'out'], [mv.t0 + Math.min(0.24, dur * 0.3), 1], [mv.t1 - Math.min(0.16, dur * 0.25), 1, 'in'], [mv.t1, endScale], [T, endScale]], T);
+    const body = glowSvg + `<g style="${storyStyle(swell)}">${partsSvg}</g>`;
 
     // fraction range of each straight run
     const segs = [];
@@ -496,6 +653,17 @@ export function compile(sc) {
       const svg = `<g transform="translate(${r1(staticPos[0])} ${r1(staticPos[1])})" opacity="${on ? 1 : 0}" style="${join(storyStyle(moveCss), storyStyle(vis))}">${body}</g>`;
       if (path.arc) air += svg; else world.push({ aabb: sg.box, svg, bias: 0.05 });
     });
+    if (rich && !isKind && path.d && !mv.stay) {
+      let Lp = 0;
+      for (let i = 1; i < path.flat.length; i++) { const a = projP(path.flat[i - 1].p), b = projP(path.flat[i].p); Lp += Math.hypot(b[0] - a[0], b[1] - a[1]); }
+      const tail = Math.min(62, Lp * 0.4);
+      const dash = [[0, path.rev ? -Lp : tail]];
+      for (let i = 0; i <= N; i++) { const u = i / N, f = mv.ease === 'linear' ? u : E(u); dash.push([mv.t0 + u * dur, path.rev ? -(Lp - f * Lp) : tail - f * Lp]); }
+      dash.push([T, dash[dash.length - 1][1]]);
+      const vis = keyframes('opacity', [[0, 0], [Math.max(0, mv.t0), 0], [mv.t0 + Math.min(0.18, dur * 0.3), 0.6], [mv.t1 - Math.min(0.2, dur * 0.3), 0.6], [mv.t1, 0], [T, 0]], T);
+      const trail = `<path d="${path.d}" fill="none" stroke="${K.hex(mv.color)}" stroke-width="${th.outline ? 2.2 : 3}" stroke-linecap="round" stroke-dasharray="${r1(tail)} ${r1(Lp * 3)}" opacity="0" style="${join(storyStyle(keyframes('dash', dash, T)), storyStyle(vis))}"/>`;
+      if (path.arc) air += trail; else floorFx += trail;
+    }
     if (pk.shadow && o.shadows && th.shadow.kind !== 'none') {
       const sp = proj(...pointAt(path, staticF).slice(0, 2), path.arc ? 0 : path.z || 0);
       const vis = windowCss(mv.t0, mv.until != null ? Math.max(mv.t1, mv.until) : mv.t1, true, true);
@@ -527,19 +695,35 @@ export function compile(sc) {
   const calloutSvg = (ax, ay, c) => {
     const left = c.side === 'left';
     const dir = left ? -1 : 1;
-    const tx = ax + 30 * dir;
+    // rise lifts the text away from the point (negative lowers it); length is how far the leader runs sideways
+    const rise = c.rise || 0, len = Math.max(14, c.length ?? 30);
+    const ty = ay - rise;
+    const tx = ax + len * dir;
     const w = Math.max(textWidth(c.text, 13, 650), c.sub ? textWidth(c.sub, 11, 500) : 0);
-    let svg = `<path d="M${r1(ax + 5 * dir)} ${r1(ay)}H${r1(tx - 6 * dir)}" stroke="${th.text.muted}" stroke-width="1.2" stroke-linecap="round" fill="none"/><circle cx="${r1(ax + 5 * dir)}" cy="${r1(ay)}" r="2.4" fill="${th.text.muted}"/>`;
-    svg += `<text x="${r1(tx)}" y="${r1(ay + (c.sub ? -2 : 4.5))}" font-size="13" font-family="${esc(th.font)}" font-weight="650" text-anchor="${left ? 'end' : 'start'}" fill="${th.text.color}"${halo}>${esc(c.text)}</text>`;
-    if (c.sub) svg += `<text x="${r1(tx)}" y="${r1(ay + 12)}" font-size="11" font-family="${esc(th.font)}" font-weight="500" text-anchor="${left ? 'end' : 'start'}" fill="${th.text.muted}"${halo}>${esc(c.sub)}</text>`;
-    const box = left ? { x0: tx - w - 4, x1: ax, y0: ay - 14, y1: ay + 18 } : { x0: ax, x1: tx + w + 4, y0: ay - 14, y1: ay + 18 };
+    const lead = rise ? `M${r1(ax)} ${r1(ay - Math.sign(rise) * 5)}L${r1(ax + Math.min(len - 8, Math.abs(rise) * 0.5) * dir)} ${r1(ty)}H${r1(tx - 6 * dir)}` : `M${r1(ax + 5 * dir)} ${r1(ay)}H${r1(tx - 6 * dir)}`;
+    const dot = rise ? [ax, ay - Math.sign(rise) * 5] : [ax + 5 * dir, ay];
+    let svg = `<path d="${lead}" stroke="${th.text.muted}" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="${r1(dot[0])}" cy="${r1(dot[1])}" r="2.4" fill="${th.text.muted}"/>`;
+    svg += `<text x="${r1(tx)}" y="${r1(ty + (c.sub ? -2 : 4.5))}" font-size="13" font-family="${esc(th.font)}" font-weight="650" text-anchor="${left ? 'end' : 'start'}" fill="${th.text.color}"${halo}>${esc(c.text)}</text>`;
+    if (c.sub) svg += `<text x="${r1(tx)}" y="${r1(ty + 12)}" font-size="11" font-family="${esc(th.font)}" font-weight="500" text-anchor="${left ? 'end' : 'start'}" fill="${th.text.muted}"${halo}>${esc(c.sub)}</text>`;
+    const box = left ? { x0: tx - w - 4, x1: tx + 2, y0: ty - 14, y1: ty + 18 } : { x0: tx - 2, x1: tx + w + 4, y0: ty - 14, y1: ty + 18 };
     grow(box);
+    grow({ x0: ax - 4, x1: ax + 4, y0: ay - 4, y1: ay + 4 });
     labelBoxes.push(box);
     return svg;
   };
   for (const c of sc.callouts) { const [ax, ay] = projP(c.at); overlay += calloutSvg(ax, ay, c); }
   const solid = sc.objs.filter((ob) => !ob.hidden).map((ob) => ({ ob, box: growBox(aabbScreen(ob.box), -5) }));
   const LS = 14, SS = 11.5;
+  // points along every floor link, so labels can keep clear of them
+  const linkDots = [];
+  for (const lk of sc.links) {
+    if (lk.path.arc) continue;
+    const fl = lk.path.flat;
+    for (let i = 1; i < fl.length; i++) {
+      const a = projP(fl[i - 1].p), b = projP(fl[i].p), n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 8));
+      for (let k = 0; k <= n; k++) linkDots.push([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n]);
+    }
+  }
   for (const ob of sc.objs) {
     const lines = [];
     if (ob.label) lines.push({ text: String(ob.label), size: LS, weight: 650, fill: th.text.color });
@@ -562,11 +746,12 @@ export function compile(sc) {
       if (side === 'left') return { x: sb.x0 - 10, y: (sb.y0 + sb.y1) / 2 - h / 2, anchor: 'end', box: { x0: sb.x0 - 10 - w, x1: sb.x0 - 10, y0: (sb.y0 + sb.y1) / 2 - h / 2, y1: (sb.y0 + sb.y1) / 2 + h / 2 } };
       return { x: cx, y: sb.y1 + 9, anchor: 'middle', box: { x0: cx - w / 2, x1: cx + w / 2, y0: sb.y1 + 9, y1: sb.y1 + 9 + h } };
     };
-    const clash = (b) => labelBoxes.some((l) => boxesOverlap(l, b, 1)) || solid.some((sld) => sld.ob !== ob && sld.ob !== ob.parent && sld.ob.parent !== ob && boxesOverlap(sld.box, b, 2));
+    const onLink = (b) => linkDots.some((q) => q[0] > b.x0 + 2 && q[0] < b.x1 - 2 && q[1] > b.y0 + 2 && q[1] < b.y1 - 2);
+    const clash = (b) => labelBoxes.some((l) => boxesOverlap(l, b, 1)) || solid.some((sld) => sld.ob !== ob && sld.ob !== ob.parent && sld.ob.parent !== ob && boxesOverlap(sld.box, b, 2)) || onLink(b);
     const order = ob.labelSide ? [ob.labelSide] : ['below', 'above', 'right', 'left'];
     let pos = place(order[0]);
     for (const side of order) { const p = place(side); if (!clash(p.box)) { pos = p; break; } }
-    if (clash(pos.box)) note('warn', 'label-overlap', `The label "${ob.label || ob.sub}" overlaps another label or object. Give "${ob.id}" more room, shorten the text, or set labelSide: 'above' | 'below' | 'left' | 'right'.`);
+    if (clash(pos.box)) note(onLink(pos.box) && !labelBoxes.some((l) => boxesOverlap(l, pos.box, 1)) ? 'hint' : 'warn', 'label-overlap', `The label "${ob.label || ob.sub}" overlaps another label, an object or a link. Give "${ob.id}" more room, shorten the text, or set labelSide: 'above' | 'below' | 'left' | 'right'.`);
     labelBoxes.push(pos.box);
     let y = pos.y, svg = '';
     for (const l of lines) {
@@ -581,8 +766,9 @@ export function compile(sc) {
       svg += `<circle cx="${r1(bx)}" cy="${r1(by)}" r="9.5" fill="${A}"/><text x="${r1(bx)}" y="${r1(by + 4)}" font-size="11.5" font-family="${esc(th.font)}" font-weight="800" text-anchor="middle" fill="${material(th, 'accent').on}">${esc(ob.opts.badge)}</text>`;
       pos.box.x0 -= 26;
     }
-    overlay += wrap(svg, opacityStyle(ob), hiddenAttr(ob));
+    overlay += wrap(wrap(svg, opacityStyle(ob), hiddenAttr(ob)), ob.tracks.move ? trackStyle(ob.tracks.move) : '');
     grow(pos.box);
+    if (ob.tracks.move) for (const sg of ob.tracks.move.segs) grow({ x0: pos.box.x0 + sg.to[0], x1: pos.box.x1 + sg.to[0], y0: pos.box.y0 + sg.to[1], y1: pos.box.y1 + sg.to[1] });
   }
 
   // --- zone labels lie on the floor along one edge of the zone. Try each edge and keep the one
@@ -621,15 +807,24 @@ export function compile(sc) {
       const m = material(th, role);
       const ic = ICONS[mk.icon].replace(/\{c\}/g, m.on);
       overlay += `<g transform="translate(${r1(cx)} ${r1(cy)})"><g opacity="0" style="${trackStyle(mk.op)}"><g style="${trackStyle(mk.sc)}"><circle r="13" fill="${m.base}" stroke="${th.outline ? th.ink : th.text.halo}" stroke-width="${th.outline || 2}"/><g transform="translate(-8 -8) scale(0.667)" fill="none" stroke="${m.on}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">${ic}</g></g></g></g>`;
-      grow({ x0: cx - 16, x1: cx + 16, y0: cy - 16, y1: cy + 16 });
+      if (rich) {
+        const t0 = mk.op.segs[0].t0;
+        const rays = Array.from({ length: 8 }, (_, k) => `<path d="M0 -19V-26" transform="rotate(${k * 45})"/>`).join('');
+        const sc2 = keyframes('scale', [[0, 0.5], [t0, 0.5, 'out'], [t0 + 0.5, 1.35], [T, 1.35]], T);
+        const op2 = keyframes('opacity', [[0, 0], [Math.max(0, t0 - 0.001), 0], [t0 + 0.08, 1, 'smooth'], [t0 + 0.5, 0], [T, 0]], T);
+        overlay += `<g transform="translate(${r1(cx)} ${r1(cy)})"><g fill="none" stroke="${m.base}" stroke-width="2" stroke-linecap="round" opacity="0" style="${join(storyStyle(sc2), storyStyle(op2))}">${rays}</g></g>`;
+      }
+      grow({ x0: cx - 16, x1: cx + 16, y0: cy - 28, y1: cy + 16 });
     });
   }
 
   // ================================================================ 6. frame, captions, background
 
   if (!bounds) bounds = { x0: -100, y0: -100, x1: 100, y1: 100 };
-  const pad = o.pad;
-  let vb = growBox(bounds, pad);
+  // pad: one number, [sides, top-and-bottom], or [top, right, bottom, left]
+  const pads = Array.isArray(o.pad) ? (o.pad.length === 2 ? [o.pad[1], o.pad[0], o.pad[1], o.pad[0]] : [0, 1, 2, 3].map((i) => o.pad[i] ?? o.pad[0] ?? 56)) : [o.pad, o.pad, o.pad, o.pad];
+  const pad = Math.min(pads[1], pads[3]);
+  let vb = { x0: bounds.x0 - pads[3], y0: bounds.y0 - pads[0], x1: bounds.x1 + pads[1], y1: bounds.y1 + pads[2] };
   const cx = (vb.x0 + vb.x1) / 2;
 
   if (o.heading) {
@@ -646,6 +841,8 @@ export function compile(sc) {
     const widest = Math.max(...captions.map((c) => textWidth(c.text, 15.5, 600)));
     if (widest + pad > vb.x1 - vb.x0) { const add = (widest + pad - (vb.x1 - vb.x0)) / 2; vb.x0 -= add; vb.x1 += add; }
     captions.forEach((c, i) => {
+      const shown = (i < captions.length - 1 ? captions[i + 1].t : T - 0.55) - c.t;
+      if (shown < 1) note('warn', 'caption-rushed', `Caption "${c.text.slice(0, 40)}${c.text.length > 40 ? '…' : ''}" is on screen for only ${r1(Math.max(0, shown))}s, so it cannot be read${shown < 0.3 ? ' and will overprint the next one' : ''}. Put the steps it describes, or s.wait(1.5), between it and the next s.say().`);
       if (c.text.length > 64) note('hint', 'caption-long', `Caption "${c.text.slice(0, 40)}…" is long. Captions read best under about 60 characters.`);
       const last = i === captions.length - 1;
       const out = last ? T - 0.55 : captions[i + 1].t; // fade out as the next caption arrives
@@ -711,7 +908,7 @@ export function compile(sc) {
   const heroes = sc.objs.filter((ob) => ob.hero);
   if (vis.length >= 4 && heroes.length === 0 && !sc.objs.some((ob) => ob.opts.glow || ['accent', 'accent2'].includes(ob.opts.color))) note('hint', 'no-hero', 'No focal point. Mark the single most important object with hero: true so the eye has somewhere to land.');
   if (heroes.length > 2) note('hint', 'many-heroes', `${heroes.length} objects are marked hero. One focal point reads best; keep hero: true for the single most important object.`);
-  const hasMotion = sc.steps || sc.objs.some((ob) => ob.float) || sc.links.some((l) => l.o.flow);
+  const hasMotion = sc.steps || sc.objs.some((ob) => ob.float || ob.animated) || sc.links.some((l) => l.o.flow);
   for (const ob of sc.objs) if (ob.level < 1 && !ob.tracks.grow) note('hint', 'never-grown', `"${ob.id}" starts at level ${ob.level} but the story never raises it. Add s.grow(${ob.id}) to the story.`);
   if (!hasMotion && sc.objs.length) note('hint', 'static', 'Nothing moves yet. Add a story (s.story([...])) to show the idea happening, or flow: true on a link.');
   if (sc.objs.filter((ob) => ob.float).length > 3) note('hint', 'too-much-float', 'More than three floating objects makes the scene feel restless. Float only the hero or things that really hover.');
@@ -724,6 +921,7 @@ export function compile(sc) {
 
   // ================================================================ 8. assemble
 
+  const hazeSvg = o.background && o.haze !== false && th.haze > 0 && H > 320 ? `<rect x="${vb.x0}" y="${vb.y0}" width="${W}" height="${Math.round(H * 0.5)}" fill="url(#${def('haze', (id) => `<linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${th.bg.to}" stop-opacity="${typeof o.haze === 'number' ? o.haze : th.haze}"/><stop offset="1" stop-color="${th.bg.to}" stop-opacity="0"/></linearGradient>`)})" pointer-events="none"/>` : '';
   const sortedWorld = depthSort(world).map((w) => w.svg).join('');
   const fadeIn = (delay, dur = 0.5) => (o.intro ? `animation:${kf('from{opacity:0}to{opacity:1}')} ${dur}s ease-out ${r2(delay)}s both` : '');
   const css = [
@@ -734,13 +932,15 @@ export function compile(sc) {
   const title = o.title || o.heading || 'Isometric illustration';
   const desc = o.desc || (sc.objs.filter((ob) => ob.label).length ? `Shows: ${sc.objs.filter((ob) => ob.label).map((ob) => ob.label).join(', ')}.` : '');
   const svg = [
-    `<svg xmlns="http://www.w3.org/2000/svg" id="${uid}" viewBox="${vb.x0} ${vb.y0} ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="${uid}-t${desc ? ` ${uid}-s` : ''}" data-loop="${r2(T)}" data-intro="${introEnd}"${o.background ? ` data-bg="${th.bg.to}"` : ''}${keyTimes.length ? ` data-keys="${[...new Set([...keyTimes, T - 0.95].map((t) => Math.max(0, Math.min(T - 0.05, t)).toFixed(2)))].join(' ')}"` : ''} font-family="${esc(th.font)}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" id="${uid}" viewBox="${vb.x0} ${vb.y0} ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="${uid}-t${desc ? ` ${uid}-s` : ''}" data-loop="${r2(T)}" data-intro="${introEnd}"${o.background ? ` data-bg="${th.bg.to}"` : ''}${th.dark ? ' data-dark="1"' : ''}${captions.length ? ` data-chapters="${esc(JSON.stringify(captions.map((c) => ({ t: +c.t.toFixed(2), text: c.text }))))}"` : ''}${keyTimes.length ? ` data-keys="${[...new Set([...keyTimes, T - 0.95].map((t) => Math.max(0, Math.min(T - 0.05, t)).toFixed(2)))].join(' ')}"` : ''} font-family="${esc(th.font)}">`,
     `<title id="${uid}-t">${esc(title)}</title>`, desc ? `<desc id="${uid}-s">${esc(desc)}</desc>` : '',
     `<style>${css}</style>`,
     `<defs>${[...defs.values()].map((d) => d.svg).join('')}</defs>`,
     bg ? `<g>${bg}</g>` : '',
     wrap(floor + glowLayer + shadowLayer + linkLayer + ringLayer + floorFx, fadeIn(0, 0.6)),
     `<g>${sortedWorld}</g>`,
+    hazeSvg,
+    motes,
     air ? wrap(air, fadeIn(introEnd * 0.6)) : '',
     wrap(overlay, fadeIn(Math.max(0, introEnd - 0.35), 0.45)),
     captionSvg ? wrap(captionSvg, fadeIn(Math.max(0, introEnd - 0.2))) : '',

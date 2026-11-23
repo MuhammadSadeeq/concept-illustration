@@ -2,7 +2,7 @@
 // Sizes are in grid cells. Every builder returns { parts, w, d, h } plus optional extras.
 
 import { rectOutline, circleOutline, UNIT, SPHERE_K } from './geom.mjs';
-import { rgba, mix, adjust } from './color.mjs';
+import { rgba, mix, adjust, isHex } from './color.mjs';
 import { ICONS } from './icons.mjs';
 
 // ---------------------------------------------------------------- helpers
@@ -96,13 +96,15 @@ function ui(kind, fw, fh, K, { accent = 'accent', dark = true, pad = 0.1 } = {})
       for (let i = 0; i < rows; i++) {
         const [ind, len, c] = pat[i % pat.length];
         line(x0 + ind * w, y0 + i * (h / rows) + 0.02, len * w, c, 0.045);
+        if (i === rows - 1) it.push({ t: 'rect', x: x0 + (ind + len) * w + 0.03, y: y0 + i * (h / rows), w: 0.045, h: 0.085, fill: A, anim: { type: 'blink', period: 1.1, min: 0 } });
       }
       break;
     }
     case 'chart': {
       const vals = [0.35, 0.55, 0.45, 0.8, 0.65, 1];
       const bw = w / (vals.length * 1.6);
-      vals.forEach((v, i) => it.push({ t: 'rect', x: x0 + i * (w / vals.length) + bw * 0.3, y: y0 + h * (1 - v * 0.85), w: bw, h: h * v * 0.85, r: 0.025, fill: i === vals.length - 1 ? A : soft(0.42) }));
+      vals.forEach((v, i) => it.push({ t: 'rect', x: x0 + i * (w / vals.length) + bw * 0.3, y: y0 + h * (1 - v * 0.85), w: bw, h: h * v * 0.85, r: 0.025, fill: i === vals.length - 1 ? A : soft(0.42), ...(i === vals.length - 1 ? { anim: { type: 'blink', period: 2.2, min: 0.55 } } : {}) }));
+      it.push({ t: 'line', x1: x0, y1: y0 + h, x2: x0 + w, y2: y0 + h, stroke: soft(0.3), sw: 0.02 });
       break;
     }
     case 'dash': {
@@ -115,7 +117,8 @@ function ui(kind, fw, fh, K, { accent = 'accent', dark = true, pad = 0.1 } = {})
       line(x0 + cw + 0.14, y0 + h * 0.2, cw * 0.5, A2, 0.07);
       const vals = [0.4, 0.62, 0.5, 0.85, 0.7, 1, 0.8];
       const gy = y0 + h * 0.44, gh = h * 0.56;
-      vals.forEach((v, i) => it.push({ t: 'rect', x: x0 + i * (w / vals.length) + 0.02, y: gy + gh * (1 - v), w: w / vals.length - 0.05, h: gh * v, r: 0.02, fill: i === 5 ? A : soft(0.3) }));
+      vals.forEach((v, i) => it.push({ t: 'rect', x: x0 + i * (w / vals.length) + 0.02, y: gy + gh * (1 - v), w: w / vals.length - 0.05, h: gh * v, r: 0.02, fill: i === 5 ? A : soft(0.3), ...(i === 5 ? { anim: { type: 'blink', period: 2.4, min: 0.55 } } : {}) }));
+      it.push({ t: 'circle', cx: x0 + w - 0.05, cy: y0 + 0.07, r: 0.03, fill: K.hex('ok'), anim: { type: 'blink', period: 1.4, min: 0.2 } });
       break;
     }
     case 'chat': {
@@ -123,6 +126,7 @@ function ui(kind, fw, fh, K, { accent = 'accent', dark = true, pad = 0.1 } = {})
       it.push({ t: 'rect', x: x0, y: y0, w: w * 0.62, h: bh, r: bh / 2, fill: soft(0.3) });
       it.push({ t: 'rect', x: x0 + w * 0.3, y: y0 + bh * 1.35, w: w * 0.7, h: bh, r: bh / 2, fill: A });
       it.push({ t: 'rect', x: x0, y: y0 + bh * 2.7, w: w * 0.48, h: bh, r: bh / 2, fill: soft(0.3) });
+      for (let k = 0; k < 3; k++) it.push({ t: 'circle', cx: x0 + w * 0.14 + k * w * 0.1, cy: y0 + bh * 3.2, r: bh * 0.16, fill: soft(0.9), anim: { type: 'blink', period: 1.2, phase: k * 0.16, min: 0.25 } });
       break;
     }
     case 'list': {
@@ -171,6 +175,9 @@ function screenFace(kind, K, accent, bezel = 0.06) {
   return (fw, fh) => [
     { t: 'rect', x: bezel, y: bezel, w: fw - bezel * 2, h: fh - bezel * 2, r: 0.05, fill: K.hex('screen') },
     { t: 'g', tx: bezel, ty: bezel, items: ui(kind, fw - bezel * 2, fh - bezel * 2, K, { accent, dark: true, pad: 0.1 }) },
+    // a soft diagonal glare so the glass reads as glass
+    K.theme.outline ? null : { t: 'poly', pts: [[fw * 0.52, bezel], [fw - bezel, bezel], [fw - bezel, fh * 0.62]], fill: '#ffffff', fillOp: 0.055 },
+    { t: 'circle', cx: fw / 2, cy: bezel / 2, r: 0.012, fill: rgba('#ffffff', 0.5) },
   ];
 }
 
@@ -187,7 +194,9 @@ def('cube', { desc: 'Plain block. Any module, unit, container or abstract "thing
     parts: [box({
       w, d, h, r: o.radius ?? K.theme.radius, color: o.color,
       top: o.icon ? (fw, fh) => [icon(o.icon, fw, fh, o.color === 'body' || o.color === 'body2' ? K.hex(o.accent) : m.on, 0.56)] : null,
-      left: o.text ? (fw, fh) => [{ t: 'text', x: fw / 2, y: fh / 2, text: o.text, size: Math.min(fh * 0.42, (fw * 1.5) / Math.max(2, o.text.length)), fill: m.onSide, weight: 800 }] : null,
+      left: o.text ? (fw, fh) => [{ t: 'text', x: fw / 2, y: fh / 2, text: o.text, size: Math.min(fh * 0.42, (fw * 1.5) / Math.max(2, o.text.length)), fill: m.onSide, weight: 800 }]
+        : (fw, fh) => (fw > 0.6 && fh > 0.6 ? [{ t: 'rect', x: 0.12, y: 0.12, w: fw - 0.24, h: fh - 0.24, r: 0.05, stroke: rgba(m.onSide, 0.13), sw: 0.025 }, { t: 'circle', cx: 0.22, cy: 0.22, r: 0.03, fill: rgba(m.onSide, 0.25) }] : []),
+      right: (fw, fh) => (fw > 0.6 && fh > 0.6 ? [0, 1].map((i) => ({ t: 'rect', x: fw * 0.3, y: fh * 0.42 + i * 0.12, w: fw * 0.4, h: 0.04, r: 0.02, fill: rgba(m.onSide, 0.16) })) : []),
     })],
   };
 });
@@ -258,7 +267,11 @@ def('server', { desc: 'Rack server with drive bays and blinking status lights. C
         for (let i = 0; i < rows; i++) it.push({ t: 'rect', x: 0.2, y: 0.18 + i * 0.11, w: fw - 0.4, h: 0.035, r: 0.017, fill: rgba(K.theme.outline ? m.ink : m.deep, K.theme.outline ? 0.55 : 0.9) });
         return it;
       },
-      top: (fw, fh) => [{ t: 'rect', x: 0.16, y: 0.16, w: fw - 0.32, h: fh - 0.32, r: 0.06, stroke: rgba(m.on, 0.12), sw: 0.025 }],
+      top: (fw, fh) => [
+        { t: 'rect', x: 0.14, y: 0.14, w: fw - 0.28, h: fh - 0.28, r: 0.06, stroke: rgba(m.on, 0.14), sw: 0.025 },
+        ...[0, 1, 2, 3].map((i) => ({ t: 'line', x1: 0.3, y1: 0.34 + i * 0.13, x2: fw - 0.3, y2: 0.34 + i * 0.13, stroke: rgba(m.on, 0.2), sw: 0.04, dash: '0.07 0.05', style: 'stroke-linecap:butt' })),
+        { t: 'rect', x: 0.3, y: fh - 0.34, w: 0.2, h: 0.05, r: 0.025, fill: A, anim: { type: 'blink', period: 3, min: 0.4 } },
+      ],
     })],
   };
 });
@@ -271,7 +284,9 @@ def('database', { desc: 'Stacked storage discs. Data at rest: a database, a stor
   for (let i = 0; i < n; i++) {
     const z = i * (dh + gap);
     if (i > 0) parts.push(cyl({ r: r - 0.05, z: z - gap, h: gap, color: o.accent, rim: false, ao: false }));
-    parts.push(cyl({ r, z, h: dh, color: o.color, top: i === n - 1 ? (fw) => [{ t: 'circle', cx: fw / 2, cy: fw / 2, r: fw * 0.3, stroke: rgba(m.on, 0.16), sw: 0.03 }] : null }));
+    parts.push(cyl({ r, z, h: dh, color: o.color, top: i === n - 1 ? (fw) => [{ t: 'circle', cx: fw / 2, cy: fw / 2, r: fw * 0.3, stroke: rgba(m.on, 0.16), sw: 0.03 }, { t: 'circle', cx: fw / 2, cy: fw / 2, r: fw * 0.1, fill: rgba(m.on, 0.1) }] : null }));
+    const f = r * 0.7071 + 0.012, A = K.hex(o.accent);
+    parts.push({ t: 'raw', at: [f, f, z + dh * 0.55], box: { x0: f - 0.02, y0: f - 0.02, z0: z + dh * 0.5, x1: f, y1: f, z1: z + dh * 0.6 }, svg: (ctx) => `<circle r="2.3" fill="${A}" style="${ctx.animStyle({ type: 'blink', period: 2.6, phase: i * 0.3, min: 0.3 })}"/><rect x="-16" y="-1.2" width="9" height="2.4" rx="1.2" fill="${rgba(m.onSide, 0.25)}"/>` });
   }
   return { w: r * 2, d: r * 2, h: n * dh + (n - 1) * gap, round: true, parts };
 });
@@ -283,10 +298,17 @@ def('laptop', { desc: 'Open laptop. A person at work, a client, a developer.', o
   const keys = (fw, fh) => {
     const along = L ? fw : fh, across = L ? fh : fw;
     const kb = { t: 'rect', x: 0.1, y: 0.12, w: fw - 0.2, h: fh - 0.24, r: 0.04, fill: rgba(m.deep, 0.9) };
+    const keyTone = rgba(m.on, K.theme.outline ? 0.35 : 0.2);
+    const rows = [];
+    for (let r = 0; r < 3; r++) {
+      const q = 0.2 + r * 0.115;
+      rows.push(L ? { t: 'line', x1: 0.17, y1: q, x2: fw - 0.17, y2: q, stroke: keyTone, sw: 0.07, dash: '0.075 0.035', style: 'stroke-linecap:butt' }
+        : { t: 'line', x1: q, y1: 0.17, x2: q, y2: fh - 0.17, stroke: keyTone, sw: 0.07, dash: '0.075 0.035', style: 'stroke-linecap:butt' });
+    }
     const padW = along * 0.26, padH = across * 0.2;
     const pad = L ? { t: 'rect', x: (fw - padW) / 2, y: fh - padH - 0.16, w: padW, h: padH, r: 0.03, fill: rgba(m.on, 0.14) }
       : { t: 'rect', x: fw - padH - 0.16, y: (fh - padW) / 2, w: padH, h: padW, r: 0.03, fill: rgba(m.on, 0.14) };
-    return [kb, pad];
+    return [kb, ...rows, pad];
   };
   const base = box({ w: L ? W : D, d: L ? D : W, h: 0.07, r: 0.06, color: o.color, top: keys });
   const scr = panel({ facing: L ? 'left' : 'right', x: L ? 0 : -D / 2 + t / 2, y: L ? -D / 2 + t / 2 : 0, z: 0.07, w: W, h: 0.98, t, r: 0.06, color: o.color, face: screenFace(o.ui || 'lines', K, o.accent) });
@@ -427,6 +449,7 @@ def('user', { desc: 'Abstract person. A customer, visitor, teammate, any human a
     w: 0.76, d: 0.76, h: 1.2, round: true,
     parts: [
       { t: 'cone', o: [0, 0, 0], r0: 0.38, r1: 0.2, h: 0.56, color: col },
+      cyl({ r: 0.215, z: 0.56, h: 0.045, color: o.head || 'paper', ao: false, rim: false }),
       { t: 'sphere', c: [0, 0, 0.9], r: 0.25, color: o.head || 'paper' },
     ],
     shadow: { r: 0.38 },
@@ -492,12 +515,18 @@ def('sign', { desc: 'Icon badge on a pole. Marks a state or meaning: lock, warni
   };
 });
 
-def('platform', { desc: 'Pedestal to stand a hero object on (use on: platform).', opts: 'size tiers round h' }, (o) => {
+def('platform', { desc: 'Pedestal to stand a hero object on (use on: platform).', opts: 'size tiers round h' }, (o, K) => {
   const s = o.size ?? 2, tiers = Math.max(1, Math.min(3, o.tiers ?? 1)), th = o.h ?? 0.2;
   const parts = [];
   for (let i = 0; i < tiers; i++) {
     const k = s - i * 0.36;
-    parts.push(o.round ? cyl({ r: k / 2, z: i * th, h: th, color: i === tiers - 1 ? o.color : 'muted' }) : box({ w: k, d: k, z: i * th, h: th, r: 0.2, color: i === tiers - 1 ? o.color : 'muted' }));
+    const last = i === tiers - 1;
+    const m = K.mat(last ? o.color : 'muted');
+    const trim = last ? (fw, fh) => (o.round
+      ? [{ t: 'circle', cx: fw / 2, cy: fh / 2, r: fw / 2 - 0.16, stroke: rgba(K.hex(o.accent), 0.55), sw: 0.03 }]
+      : [{ t: 'rect', x: 0.16, y: 0.16, w: fw - 0.32, h: fh - 0.32, r: 0.14, stroke: rgba(K.hex(o.accent), 0.55), sw: 0.03 },
+        ...[[0.3, 0.3], [fw - 0.3, 0.3], [0.3, fh - 0.3], [fw - 0.3, fh - 0.3]].map(([cx, cy]) => ({ t: 'circle', cx, cy, r: 0.035, fill: rgba(m.on, 0.22) }))]) : null;
+    parts.push(o.round ? cyl({ r: k / 2, z: i * th, h: th, color: last ? o.color : 'muted', top: trim }) : box({ w: k, d: k, z: i * th, h: th, r: 0.2, color: last ? o.color : 'muted', top: trim }));
   }
   return { w: s, d: s, h: tiers * th, round: !!o.round, parts };
 });
@@ -555,7 +584,12 @@ def('building', { desc: 'Office tower with lit windows. A company, an organisati
   };
   return {
     w, d, h: h + 0.16,
-    parts: [box({ w, d, h, r: 0.04, color: o.color, left: wins(1), right: wins(4) }), box({ w: w * 0.42, d: d * 0.42, h: 0.16, z: h, x: -w * 0.12, y: -d * 0.12, color: 'body2', ao: false })],
+    parts: [
+      box({ w, d, h, r: 0.04, color: o.color, left: (fw, fh) => [...wins(1)(fw, fh).filter((it) => !(it.y > fh - 0.5 && Math.abs(it.x + it.w / 2 - fw / 2) < 0.3)), { t: 'rect', x: fw / 2 - 0.17, y: fh - 0.42, w: 0.34, h: 0.42, r: 0.03, fill: A }, { t: 'rect', x: fw / 2 - 0.26, y: fh - 0.5, w: 0.52, h: 0.06, r: 0.02, fill: rgba(m.onSide, 0.5) }], right: wins(4) }),
+      box({ w: w * 0.42, d: d * 0.42, h: 0.16, z: h, x: -w * 0.12, y: -d * 0.12, color: 'body2', ao: false }),
+      { t: 'line', pts: [[w * 0.22, d * 0.2, h], [w * 0.22, d * 0.2, h + 0.5]], stroke: K.hex('dark'), sw: 1.6 },
+      { t: 'raw', at: [w * 0.22, d * 0.2, h + 0.52], box: { x0: w * 0.2, y0: d * 0.18, z0: h + 0.48, x1: w * 0.24, y1: d * 0.22, z1: h + 0.56 }, svg: (ctx) => `<circle r="2.6" fill="${K.hex('danger')}" style="${ctx.animStyle({ type: 'blink', period: 1.8, min: 0.15 })}"/>` },
+    ],
   };
 });
 
@@ -958,6 +992,53 @@ def('queue', { desc: 'Row of waiting blocks. A queue, a buffer, a backlog, messa
   }
   return { w: isX ? Lg + 0.4 : 0.9, d: isX ? 0.9 : Lg + 0.4, h: 0.08 + s * 0.8, parts };
 });
+
+/**
+ * The same building blocks the kit is made of, for objects the kit does not have.
+ * Everything is in grid cells, relative to the object's own origin (the centre of its footprint on the floor).
+ */
+export const SHAPES = {
+  /** Upright block. top / left / right take flat artwork: an array of items or (faceWidth, faceHeight) => items. */
+  box,
+  /** Cylinder standing on the floor. top takes flat artwork. */
+  cyl,
+  /** Upright slab facing 'left' or 'right'. face takes flat artwork; outline replaces the rectangle with any shape [[a, b], ...] (a across, b up). */
+  panel,
+  /** Any outline pushed out of a plane. plane 'top' rises, 'left' comes toward the lower-left, 'right' toward the lower-right. */
+  prism: ({ plane = 'top', at = [0, 0, 0], outline, depth = 1, color = 'body', ...rest }) => ({ t: 'prism', plane, o: at, pts: outline, depth, color, ...rest }),
+  sphere: ({ x = 0, y = 0, z = 0.5, r = 0.5, color = 'body', ...rest }) => ({ t: 'sphere', c: [x, y, z], r, color, ...rest }),
+  /** Cone, or a tapered cylinder when r2 is given (r at the bottom, r2 at the top). */
+  cone: ({ x = 0, y = 0, z = 0, r = 0.5, r2 = 0, h = 1, color = 'body', ...rest }) => ({ t: 'cone', o: [x, y, z], r0: r, r1: r2, h, color, ...rest }),
+  /** Convex solid from flat faces; list each face's corners counter-clockwise as seen from outside. */
+  mesh: ({ faces, color = 'body', rimEdges, ...rest }) => ({ t: 'mesh', faces, color, rimEdges, ...rest }),
+  /** Flat artwork lying on a plane at a point in space. */
+  decal: ({ plane = 'top', at = [0, 0, 0], items, size = [1, 1], turn = 0, ...rest }) => ({ t: 'decal', plane, o: at, items, size, turn, ...rest }),
+  /** Any SVG markup standing upright at a point in space (drawn in screen pixels around that point). */
+  raw: ({ x = 0, y = 0, z = 0, svg, w = 1, d = 0.2, h = 1, ...rest }) => ({ t: 'raw', at: [x, y, z], svg, box: { x0: x - w / 2, y0: y - d / 2, z0: z, x1: x + w / 2, y1: y + d / 2, z1: z + h }, ...rest }),
+  /** A soft ball of light at a point in space: a lit lamp, a spark, a hot spot. r is its reach in cells. */
+  glow: ({ x = 0, y = 0, z = 0.5, r = 0.8, color = 'gold', strength = 1, ...rest }) => ({
+    t: 'raw', at: [x, y, z], box: { x0: x - 0.04, y0: y - 0.04, z0: z - 0.04, x1: x + 0.04, y1: y + 0.04, z1: z + 0.04 }, ...rest,
+    svg: (ctx) => {
+      const hex = isHex(color) ? color : ctx.theme.roles[color] || ctx.theme.roles.gold;
+      const k = Math.max(0, Math.min(1, strength));
+      const id = ctx.def(`light|${hex}|${k}`, (gid) => `<radialGradient id="${gid}"><stop offset="0" stop-color="#ffffff" stop-opacity="${+(0.9 * k).toFixed(2)}"/><stop offset="0.16" stop-color="${hex}" stop-opacity="${+(0.85 * k).toFixed(2)}"/><stop offset="0.5" stop-color="${hex}" stop-opacity="${+(0.28 * k).toFixed(2)}"/><stop offset="1" stop-color="${hex}" stop-opacity="0"/></radialGradient>`);
+      return `<circle r="${+(r * UNIT).toFixed(1)}" fill="url(#${id})"/>`;
+    },
+  }),
+  /** Several shapes that move as one: sh.group({ parts: [...], anim }). */
+  group: ({ parts, anim, sort, opacity }) => ({ t: 'group', parts, anim, sort, opacity }),
+  /** A thin line through points in space [[x, y, z], ...]: a cable, an antenna, a beam. */
+  wire: ({ points, color, width = 1.5, dash, ...rest }) => ({ t: 'line', pts: points, stroke: color, sw: width, dash, ...rest }),
+  outline: {
+    rect: rectOutline,
+    circle: circleOutline,
+    ngon: (n, r, rotation = 0) => Array.from({ length: n }, (_, i) => [Math.cos(rotation + (i / n) * Math.PI * 2) * r, Math.sin(rotation + (i / n) * Math.PI * 2) * r]),
+    blob: blobOutline,
+    gear: gearOutline,
+  },
+  /** An icon as flat artwork, centred in a face of the given size. */
+  icon: (name, fw, fh, color, k = 0.6) => icon(name, fw, fh, color, k),
+};
 
 export const KIT = B;
 export const KIND_NAMES = Object.keys(B);

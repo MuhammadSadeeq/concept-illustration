@@ -1,7 +1,7 @@
 // An AI agent answering a question by using tools and memory.
 // Pattern: a hero in the middle on a pedestal, helpers around it, round trips that end in a result.
 export default ({ scene }) => {
-  const s = scene({ theme: 'clay', title: 'How an AI agent works through a task' });
+  const s = scene({ look: 'plum', finish: 'soft', floor: 'rings', title: 'How an AI agent works through a task' });
 
   const stage = s.add('platform', { at: [0, 0], size: 2.8, tiers: 2 });
   const agent = s.add('robot', { on: stage, label: 'Agent', hero: true, float: { amp: 4 } });

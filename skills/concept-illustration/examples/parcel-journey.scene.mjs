@@ -1,7 +1,7 @@
 // From order to doorstep: a physical process with a vehicle that really drives.
 // Pattern: any kit object can travel as a token (as: 'truck'); a link styled as a road gives it a route.
 export default ({ scene }) => {
-  const s = scene({ theme: 'sunset', title: 'From order to doorstep' });
+  const s = scene({ look: 'sand', floor: 'plate', title: 'From order to doorstep' });
 
   const phone = s.add('phone', { at: [0, 0], label: 'Order', ui: 'list' });
   const plant = s.add('factory', { at: [4.6, 0], label: 'Warehouse', hero: true, color: 'body2' });

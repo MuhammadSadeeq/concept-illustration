@@ -150,5 +150,5 @@ export function reversePath(path) {
   const flat = [...path.flat].reverse().map((f) => ({ p: f.p, seg: path.segs - 1 - f.seg }));
   const lens = [0];
   for (let i = 1; i < flat.length; i++) lens.push(lens[i - 1] + Math.hypot(flat[i].p[0] - flat[i - 1].p[0], flat[i].p[1] - flat[i - 1].p[1], flat[i].p[2] - flat[i - 1].p[2]));
-  return { ...path, flat, lens };
+  return { ...path, flat, lens, rev: !path.rev };
 }

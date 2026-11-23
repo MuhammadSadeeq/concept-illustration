@@ -27,18 +27,19 @@ for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.scene.mjs')).s
   write(file.replace('.scene.mjs', '.svg'), r.svg);
 }
 
-// 2. one scene in every theme
-for (const theme of iso.THEME_NAMES) {
-  const s = iso.scene({ theme, title: `${theme} theme`, pad: 40, intro: false });
+// 2. one scene in nine different looks (palette : finish : floor)
+const LOOKS = ['aurora', 'neon', 'plum:soft:plate', 'forest', 'sand', 'mint', 'lemon', 'studio', 'noir'];
+for (const spec of LOOKS) {
+  const [look, finish, floor] = spec.split(':');
+  const s = iso.scene({ look, finish, floor, title: `${spec} look`, pad: 40, intro: false });
   const a = s.add('laptop', { at: [0, 0], ui: 'code' });
   const base = s.add('platform', { at: [4.4, 0], size: 2.2 });
   const b = s.add('server', { on: base, hero: true });
   const c = s.add('database', { at: [8.8, 0] });
-  const d = s.add('document', { at: [4.4, 4.2] });
+  const d = s.add('browser', { at: [4.4, 4.2] });
   s.link(a, base); s.link(base, c, { style: 'dashed', flow: true }); s.link(base, d);
   s.story([s.send(a, base), s.pulse(b), s.send(base, d, { as: 'doc' }), s.mark(d, 'check'), s.wait(0.8)]);
-  s.text(theme, { at: [-0.9, 5.6], size: 0.62 });
-  write(`theme-${theme}.svg`, s.build().svg);
+  write(`look-${look}.svg`, s.build().svg);
 }
 
 // 3. the whole kit on one sheet
@@ -48,6 +49,14 @@ for (const theme of iso.THEME_NAMES) {
   const cols = 10, a = 2.05, b = 4.1;
   iso.KIND_NAMES.forEach((k, i) => { const c = i % cols, r = Math.floor(i / cols); s.add(k, { at: [c * a + r * b, r * b - c * a], label: k }); });
   write('kit.svg', s.build().svg);
+}
+
+// 4. one interactive page, to open locally
+{
+  const { experienceHtml } = await import('../skills/concept-illustration/scripts/lib/experience.mjs');
+  const mod = await import(pathToFileURL(path.join(dir, 'request-lifecycle.scene.mjs')).href);
+  const r = (await mod.default({ ...iso, recipes: makeRecipes(iso.scene) })).build();
+  write('request-lifecycle.experience.html', experienceHtml('request-lifecycle', r, { mode: 'step' }));
 }
 
 if (process.argv.includes('--posters')) {

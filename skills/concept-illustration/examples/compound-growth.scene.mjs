@@ -1,8 +1,8 @@
 // Compound interest: each year's gain is worked out on a bigger total, built with the growth recipe.
 // Pattern: a quantity over time. Bars rise one after another, climbing up and to the right.
 export default ({ recipes }) => recipes.growth({
-  theme: 'clay',
-  accent: '#16a374',
+  look: 'sky',
+  floor: 'none',
   title: 'How compound interest grows savings',
   prefix: '$',
   values: [

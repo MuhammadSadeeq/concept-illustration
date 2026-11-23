@@ -1,6 +1,6 @@
 // Build, measure, learn: a loop that feeds itself, built with the cycle recipe.
 export default ({ recipes }) => recipes.cycle({
-  theme: 'sunset',
+  look: 'sunset',
   title: 'Build, measure, learn',
   stages: [
     { kind: 'cube', label: 'Build', icon: 'wrench', say: 'Build the smallest useful thing', emits: 'box' },

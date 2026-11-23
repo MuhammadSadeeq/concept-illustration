@@ -1,7 +1,7 @@
 // End-to-end encryption: readable at both ends, unreadable in between.
 // Pattern: a U-shaped route, a change of token along the way, and an onlooker who gets nothing.
 export default ({ scene }) => {
-  const s = scene({ theme: 'aurora', title: 'End-to-end encryption', accent: '#5b8cff', accent2: '#39e0b5' });
+  const s = scene({ look: 'abyss', title: 'End-to-end encryption' });
 
   const alice = s.add('laptop', { at: [0, 0], label: 'Sender', ui: 'chat' });
   const lock = s.add('lock', { at: [4.6, 0], label: 'Encrypt', hero: true });

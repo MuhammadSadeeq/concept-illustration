@@ -33,6 +33,9 @@ window.__seek = (t, withIntro) => {
   }
 };`;
 
+// A transparent scene is reviewed on a page of the tone it was designed for, never on the sheet's own dark frame.
+const tileBg = (svg) => (String(svg).match(/data-bg="(#[0-9a-fA-F]{6})"/) || [])[1] || (/data-dark="1"/.test(String(svg)) ? '#14161b' : '#ffffff');
+
 function pageHtml(svg, { bg = 'transparent', width, sheet } = {}) {
   const m = meta(svg);
   if (!sheet) {
@@ -42,7 +45,7 @@ function pageHtml(svg, { bg = 'transparent', width, sheet } = {}) {
   const cells = sheet.times.map((t, i) => {
     // each copy needs its own ids so gradients and keyframes do not collide
     const copy = svg.replace(/iso[0-9a-z]+(?=[-"#.)\s])/g, (id) => `${id}f${i}`).replace('<svg ', `<svg data-t="${t.toFixed(3)}" `);
-    return `<figure><div>${copy}</div><figcaption>${t.toFixed(1)}s</figcaption></figure>`;
+    return `<figure><div style="background:${tileBg(svg)}">${copy}</div><figcaption>${t.toFixed(1)}s</figcaption></figure>`;
   }).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#16181d;font:600 13px system-ui,sans-serif;color:#cfd3dc}main{display:grid;grid-template-columns:repeat(${cols},${cell}px);gap:8px;padding:8px}figure{margin:0;background:#22252c;border-radius:6px;overflow:hidden}figure svg{display:block;width:100%;height:auto}figcaption{padding:4px 8px}</style></head><body><main>${cells}</main><script>${SEEK}</script></body></html>`;
 }
@@ -133,7 +136,14 @@ export async function renderSheet(svg, out, { frames = 8, cols, cell } = {}) {
     for (let i = 0; i < frames - 1; i++) times.push(keys[Math.round((i * (keys.length - 1)) / Math.max(1, frames - 2))]);
   } else {
     times = [0, ...keys];
-    for (let i = 1; times.length < frames && i < frames * 4; i++) { const t = (m.loop * i) / (frames * 4); if (times.every((k) => Math.abs(k - t) > m.loop / (frames * 2))) times.push(t); }
+    // fill the widest gaps first, so the extra frames spread over the whole loop
+    while (times.length < frames) {
+      const s = [...times, m.loop].sort((a, b) => a - b);
+      let gi = 0;
+      for (let i = 1; i < s.length; i++) if (s[i] - s[i - 1] > s[gi + 1] - s[gi]) gi = i - 1;
+      if (s[gi + 1] - s[gi] < 0.5) break;
+      times.push((s[gi] + s[gi + 1]) / 2);
+    }
   }
   times = [...new Set(times.map((t) => +t.toFixed(2)))].sort((a, b) => a - b);
   frames = times.length;
@@ -153,6 +163,36 @@ export async function renderSheet(svg, out, { frames = 8, cols, cell } = {}) {
   if (!exe) throw new Error('No browser engine found. Install one with "npm i -D playwright && npx playwright install chromium", or set CHROME_PATH to a Chrome/Chromium/Edge binary.');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-'));
   const file = path.join(tmp, 'sheet.html');
+  fs.writeFileSync(file, html.replace('</body>', `<script>addEventListener('load',()=>window.__seek(0,false))</script></body>`));
+  const r = spawnSync(exe, ['--headless=new', '--no-sandbox', '--hide-scrollbars', `--window-size=${W},${H}`, `--screenshot=${path.resolve(out)}`, pathToFileURL(file).href], { encoding: 'utf8' });
+  if (r.status !== 0 || !fs.existsSync(out)) throw new Error(`Chrome could not take the screenshot: ${(r.stderr || '').slice(0, 300)}`);
+  return out;
+}
+
+/** Several builds of one scene side by side (for comparing looks). items: [{ label, svg }] */
+export async function renderGrid(items, out, { cols, cell } = {}) {
+  cols = cols || (items.length <= 4 ? 2 : 3);
+  cell = cell || (cols === 2 ? 620 : 460);
+  const m = meta(items[0].svg);
+  const rows = Math.ceil(items.length / cols);
+  const cells = items.map(({ label, svg }) => {
+    const keys = ((svg.match(/data-keys="([^"]+)"/) || [, ''])[1]).split(' ').filter(Boolean).map(Number).sort((a, b) => a - b);
+    const t = keys.length ? keys[Math.floor(keys.length / 2)] + 0.3 : meta(svg).loop * 0.4; // just after a key moment, so the caption has settled
+    return `<figure><div style="background:${tileBg(svg)}">${svg.replace('<svg ', `<svg data-t="${t.toFixed(2)}" `)}</div><figcaption>${label}</figcaption></figure>`;
+  }).join('');
+  const html = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#16181d;font:600 13px system-ui,sans-serif;color:#cfd3dc}main{display:grid;grid-template-columns:repeat(${cols},${cell}px);gap:8px;padding:8px}figure{margin:0;background:#22252c;border-radius:6px;overflow:hidden}figure svg{display:block;width:100%;height:auto}figcaption{padding:5px 9px}</style></head><body><main>${cells}</main><script>${SEEK}</script></body></html>`;
+  const W = cols * cell + (cols + 1) * 8, H = Math.round(rows * ((cell * m.h) / m.w + 30) + (rows + 1) * 8);
+  const done = await withPage({ width: W, height: H }, 1, async (page) => {
+    await page.setContent(html);
+    await page.evaluate(() => window.__seek(0, false));
+    await page.screenshot({ path: out, fullPage: true });
+    return true;
+  });
+  if (done) return out;
+  const exe = findChrome();
+  if (!exe) throw new Error('No browser engine found. Install one with "npm i -D playwright && npx playwright install chromium", or set CHROME_PATH to a Chrome/Chromium/Edge binary.');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-'));
+  const file = path.join(tmp, 'looks.html');
   fs.writeFileSync(file, html.replace('</body>', `<script>addEventListener('load',()=>window.__seek(0,false))</script></body>`));
   const r = spawnSync(exe, ['--headless=new', '--no-sandbox', '--hide-scrollbars', `--window-size=${W},${H}`, `--screenshot=${path.resolve(out)}`, pathToFileURL(file).href], { encoding: 'utf8' });
   if (r.status !== 0 || !fs.existsSync(out)) throw new Error(`Chrome could not take the screenshot: ${(r.stderr || '').slice(0, 300)}`);

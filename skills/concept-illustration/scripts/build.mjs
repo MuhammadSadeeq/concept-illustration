@@ -5,6 +5,8 @@
 //   node build.mjs my.scene.mjs --sheet         -> also my.sheet.png (frames across the loop)
 //   node build.mjs my.scene.mjs --png --at 2.5  -> also my.png (still at 2.5s; omit --at for the resting state)
 //   node build.mjs my.scene.mjs --mp4 | --gif | --webm
+//   node build.mjs my.scene.mjs --looks          -> also my.looks.png (the scene in several looks)
+//   node build.mjs my.scene.mjs --experience step -> also my.experience.html (interactive)
 //   node build.mjs --list                       -> every object kind, icon, theme and token
 //
 // A scene script is an ES module whose default export receives the API and returns a scene:
@@ -24,7 +26,13 @@ function list() {
   const pad = (s, n) => s + ' '.repeat(Math.max(1, n - s.length));
   console.log('OBJECT KINDS  s.add(kind, { at: [x, y], label, ... })\n');
   for (const k of iso.KIND_NAMES) console.log(`  ${pad(k, 11)}${iso.KIT[k].desc}${iso.KIT[k].opts ? `  [${iso.KIT[k].opts.split(' ').join(', ')}]` : ''}`);
-  console.log(`\nTHEMES   ${iso.THEME_NAMES.join(', ')}`);
+  console.log('\nLOOKS  scene({ look, finish, floor })   or   scene({ palette: { bg, accent, accent2 }, finish, floor })\n');
+  for (const k of iso.PALETTE_NAMES) console.log(`  ${pad(k, 11)}${pad(iso.PALETTES[k].finish + ' / ' + iso.PALETTES[k].floor, 18)}${iso.PALETTES[k].mood}`);
+  console.log(`\nFINISHES`);
+  for (const k of iso.FINISH_NAMES) console.log(`  ${pad(k, 11)}${iso.FINISHES[k]}`);
+  console.log(`\nFLOORS`);
+  for (const k of iso.FLOOR_NAMES) console.log(`  ${pad(k, 11)}${iso.FLOORS[k]}`);
+  console.log('');
   console.log(`COLOURS  ${iso.ROLE_NAMES.join(', ')}  (or any hex)`);
   console.log(`TOKENS   ${iso.PACKET_NAMES.join(', ')}  (s.send(a, b, { as }))`);
   console.log(`RECIPES  ${RECIPE_NAMES.join(', ')}`);
@@ -72,15 +80,18 @@ async function main() {
   if (flag('list')) return list();
   const file = argv.find((a) => !a.startsWith('--') && /\.(mjs|js)$/.test(a));
   if (!file || flag('help')) {
-    console.log('Usage: node build.mjs <name>.scene.mjs [--out DIR] [--sheet] [--png [--at SEC]] [--mp4|--gif|--webm] [--theme NAME] [--no-html]\n       node build.mjs --list');
+    console.log('Usage: node build.mjs <name>.scene.mjs [--out DIR] [--sheet] [--looks [a,b,c]] [--png [--at SEC]] [--mp4|--gif|--webm] [--look NAME] [--finish NAME] [--floor NAME] [--experience [loop|step|scroll]] [--no-html]\n       node build.mjs --list');
     process.exit(file ? 0 : 1);
   }
   const abs = path.resolve(file);
   if (!fs.existsSync(abs)) throw new Error(`Scene script not found: ${file}`);
   const mod = await import(pathToFileURL(abs).href + `?t=${Date.now()}`);
-  const themeOverride = val('theme');
-  const sceneFn = (o = {}) => iso.scene(themeOverride ? { ...o, theme: themeOverride } : o);
-  const api = { ...iso, scene: sceneFn, recipes: makeRecipes(sceneFn) };
+  const over = {};
+  if (val('look') || val('theme')) { over.look = val('look') || val('theme'); over.theme = undefined; over.palette = undefined; }
+  if (val('finish')) over.finish = val('finish');
+  if (val('floor')) over.floor = val('floor');
+  const sceneFn = (o = {}) => iso.scene({ ...o, ...over });
+  const api = { ...iso, scene: sceneFn, recipes: makeRecipes(sceneFn), shapes: iso.SHAPES };
   let s = mod.default ?? mod.scene;
   if (typeof s === 'function') s = await s(api);
   if (!s || typeof s.build !== 'function') throw new Error(`${path.basename(file)} must default-export a function that returns a scene:\n  export default ({ scene }) => { const s = scene({ theme: 'aurora' }); /* ... */ return s; };`);
@@ -93,6 +104,39 @@ async function main() {
   fs.writeFileSync(svgPath, r.svg);
   const made = [svgPath];
   if (!flag('no-html')) { const p = path.join(outDir, `${name}.html`); fs.writeFileSync(p, previewHtml(name, r)); made.push(p); }
+
+  // --experience [loop|step|scroll]: an interactive page with controls, chapters and hover cards
+  if (flag('experience')) {
+    const mode = val('experience', 'loop');
+    if (!['loop', 'step', 'scroll'].includes(mode)) throw new Error(`--experience takes loop, step or scroll, got "${mode}".`);
+    try {
+      const { experienceHtml } = await import('./lib/experience.mjs');
+      const p = path.join(outDir, `${name}.experience.html`);
+      fs.writeFileSync(p, experienceHtml(name, r, { mode }));
+      made.push(p);
+    } catch (e) {
+      console.log(`\n! Could not write the interactive page: ${e.code === 'ERR_MODULE_NOT_FOUND' ? 'this copy of the skill has no scripts/lib/experience.mjs' : e.message}`);
+    }
+  }
+
+  // --looks [a,b,c]: the same scene in several looks on one sheet, to choose between them by eye
+  if (flag('looks')) {
+    const asked = (val('looks') || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const pool = ['aurora', 'mint', 'sand', 'plum', 'sky', 'lemon', 'ocean', 'paper', 'forest', 'blossom', 'carbon', 'grape'];
+    const names = asked.length ? asked : [s.look, ...pool.filter((n) => n !== s.look)].filter(Boolean).slice(0, 6);
+    const items = [];
+    for (const spec of names) {
+      const [look, finish, floor] = spec.split(':');
+      const fn = (o = {}) => iso.scene({ ...o, look, theme: undefined, palette: undefined, finish: finish || undefined, floor: floor || undefined });
+      let v = mod.default ?? mod.scene;
+      if (typeof v === 'function') v = await v({ ...iso, scene: fn, recipes: makeRecipes(fn), shapes: iso.SHAPES });
+      items.push({ label: spec, svg: v.build().svg });
+    }
+    try {
+      const R = await import('./render.mjs');
+      made.push(await R.renderGrid(items, path.join(outDir, `${name}.looks.png`)));
+    } catch (e) { console.log(`\n! Could not render the looks sheet: ${e.message}`); }
+  }
 
   const wantsRaster = ['png', 'sheet', 'mp4', 'gif', 'webm'].some(flag);
   if (wantsRaster) {

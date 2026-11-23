@@ -1,12 +1,13 @@
 // How a CDN answers a request: the first request misses the cache, the second is served at the edge.
 // Pattern: three actors in a row, one focal object, a story with a change of state halfway through.
+// The info texts become hover cards when it is built with --experience.
 export default ({ scene }) => {
-  const s = scene({ theme: 'aurora', title: 'How a CDN answers a request' });
+  const s = scene({ look: 'aurora', title: 'How a CDN answers a request' });
 
-  const visitor = s.add('laptop', { at: [0, 0], label: 'Visitor', ui: 'image' });
+  const visitor = s.add('laptop', { at: [0, 0], label: 'Visitor', ui: 'image', info: 'Someone opening the site. They only notice how fast the page appears.' });
   const base = s.add('platform', { at: [5, 0], size: 2.3 });
-  const edge = s.add('server', { on: base, label: 'Edge cache', sub: 'close to the visitor', hero: true });
-  const origin = s.add('database', { at: [10.4, 0], label: 'Origin', sub: 'far away' });
+  const edge = s.add('server', { on: base, label: 'Edge cache', sub: 'close to the visitor', hero: true, info: 'Keeps a copy of every page near the visitor, so repeat requests never travel to the origin.' });
+  const origin = s.add('database', { at: [10.4, 0], label: 'Origin', sub: 'far away', info: 'The one place the real content lives. Every trip here costs time.' });
   s.zone({ around: [origin], label: 'DATA CENTRE', style: 'outline', pad: 1 });
 
   s.link(visitor, base, { arrow: 'both' });
