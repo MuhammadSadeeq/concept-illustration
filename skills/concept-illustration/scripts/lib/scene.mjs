@@ -31,7 +31,7 @@ function unknown(what, value, list) {
 }
 
 const COMMON_OPTS = ['at', 'on', 'z', 'scale', 'color', 'accent', 'label', 'sub', 'labelSide', 'hero', 'hidden', 'float', 'glow', 'id', 'shadow', 'badge', 'level', 'info', 'opacity', 'ghost'];
-const STEP_OPTS = ['at', 'dur', 'delay', 'color', 'keep', 'as', 'count', 'stagger', 'speed', 'label', 'route', 'via', 'arc', 'ease', 'react', 'stay', 'id', 'scale'];
+const STEP_OPTS = ['at', 'hold', 'dur', 'delay', 'color', 'keep', 'as', 'count', 'stagger', 'speed', 'label', 'route', 'via', 'arc', 'ease', 'react', 'stay', 'id', 'scale'];
 const SCENE_OPTS = ['series', 'look', 'theme', 'palette', 'finish', 'floor', 'accent', 'accent2', 'bg', 'background', 'grid', 'title', 'desc', 'heading', 'subheading', 'loop', 'intro', 'pad', 'aspect', 'size', 'id', 'font', 'shadows', 'haze', 'vignette', 'detail'];
 const LINK_OPTS = ['style', 'color', 'arrow', 'flow', 'route', 'via', 'label', 'arc', 'width', 'z', 'gap', 'dim'];
 
@@ -222,6 +222,25 @@ export class Scene {
     return this.add(name, rest);
   }
 
+  /**
+   * Shapes that are not objects: particle paths, arrows, field lines, guides, ripples.
+   * They take up no room. Nothing avoids them, they throw no shadow, and they are never reported as
+   * overlapping anything, so they can run round and between the objects. Coordinates are scene cells.
+   *   s.draw((sh, K) => [sh.stream({ points: [[0, 0, 0.1], [6, 0, 0.1]] }), sh.arrow({ from: [0, 2, 0], to: [6, 2, 0] })]);
+   * layer: 'floor' (default, under the objects) | 'air' (over them) | 'sorted' (in among them by depth).
+   */
+  draw(parts, o = {}) {
+    if (parts && !Array.isArray(parts) && typeof parts !== 'function' && parts.t == null) { o = parts; parts = o.parts; }
+    if (parts && !Array.isArray(parts) && typeof parts !== 'function') parts = [parts];
+    if (!parts) throw new Error('draw(parts): pass shapes, or a function (sh, K) => [ ...shapes ], e.g. s.draw((sh) => [sh.arrow({ from: [0, 2, 0], to: [4, 2, 0] })]).');
+    const layer = o.layer || 'floor';
+    if (!['floor', 'air', 'sorted'].includes(layer)) throw unknown('layer', layer, ['floor', 'air', 'sorted']);
+    const { layer: _l, parts: _p, ...rest } = o;
+    const obj = this.custom({ at: [0, 0], ...rest, parts, shadow: false });
+    obj.free = true; obj.layer = layer;
+    return obj;
+  }
+
   /** Stand any SVG markup upright at a point: a logo, a hand-drawn figure, anything. w and h are its size in cells. */
   svg(markup, o = {}) {
     const { w = 1, h = 1, ...rest } = o;
@@ -385,6 +404,7 @@ export class Scene {
     const whole = target == null;
     if (!whole && !Array.isArray(target)) target = this._obj(target, 'zoom(target, k)');
     if (!whole && !(k > 0)) throw new Error('zoom(target, k): k is how many times closer, e.g. s.zoom(nucleus, 3).');
+    // hold: stay in close for this many seconds, then come back out by itself, all in one step
     return { type: 'zoom', to: whole ? null : target, k: whole ? 1 : k, ...o };
   }
   /** A caption. say('…', { at: 6 }) pins it to an absolute time on the scene clock. */
@@ -410,8 +430,8 @@ export class Scene {
   build() { return compile(this); }
 }
 
-const METHODS = ['add', 'link', 'zone', 'text', 'callout', 'expect', 'zoom', 'row', 'grid', 'ring', 'define', 'custom', 'svg', 'float', 'story', 'send', 'move', 'pulse', 'glow', 'pop', 'show', 'hide', 'lift', 'drop', 'grow', 'tint', 'shake', 'mark', 'say', 'wait', 'build', 'toSVG'];
-const METHOD_ALIAS = { camera: 'zoom', focus: 'zoom', assert: 'expect', check: 'expect', verify: 'expect', connect: 'link', arrow: 'link', edge: 'link', line: 'link', object: 'add', place: 'add', put: 'add', node: 'add', group: 'zone', region: 'zone', area: 'zone', annotate: 'callout', caption: 'say', narrate: 'say', emit: 'send', flow: 'send', highlight: 'glow', reveal: 'pop', appear: 'pop', rise: 'grow', raise: 'grow', pause: 'wait', delay: 'wait', sleep: 'wait', timeline: 'story', sequence: 'story', hover: 'float', render: 'build', compile: 'build' };
+const METHODS = ['add', 'draw', 'link', 'zone', 'text', 'callout', 'expect', 'zoom', 'row', 'grid', 'ring', 'define', 'custom', 'svg', 'float', 'story', 'send', 'move', 'pulse', 'glow', 'pop', 'show', 'hide', 'lift', 'drop', 'grow', 'tint', 'shake', 'mark', 'say', 'wait', 'build', 'toSVG'];
+const METHOD_ALIAS = { overlay: 'draw', shapes: 'draw', layer: 'draw', camera: 'zoom', focus: 'zoom', assert: 'expect', check: 'expect', verify: 'expect', connect: 'link', arrow: 'link', edge: 'link', line: 'link', object: 'add', place: 'add', put: 'add', node: 'add', group: 'zone', region: 'zone', area: 'zone', annotate: 'callout', caption: 'say', narrate: 'say', emit: 'send', flow: 'send', highlight: 'glow', reveal: 'pop', appear: 'pop', rise: 'grow', raise: 'grow', pause: 'wait', delay: 'wait', sleep: 'wait', timeline: 'story', sequence: 'story', hover: 'float', render: 'build', compile: 'build' };
 
 /** Create a scene. Calling a method that does not exist explains what to use instead. */
 export const scene = (opts) => new Proxy(new Scene(opts), {

@@ -16,6 +16,15 @@ const planeOf = (a) => a.plane || { x: 'right', y: 'left', z: 'top' }[a.axis || 
 
 export const periodOf = (a, T) => snapPeriod(a.period || DEFAULT_PERIOD[a.type] || T, T);
 
+/** The keys of a keyed sequence in order, each with `at` from 0 to 1. A key may give `t` in seconds instead. */
+export function normKeys(a, P) {
+  const ks = (a.keys || []).map((k) => ({ ...k, at: k.at != null ? k.at : k.t != null ? k.t / P : 0 })).sort((x, y) => x.at - y.at);
+  if (!ks.length) return ks;
+  if (ks[0].at > 0) ks.unshift({ ...ks[0], at: 0 });
+  if (ks[ks.length - 1].at < 1) ks.push({ ...ks[0], at: 1 });
+  return ks;
+}
+
 /** What an animation has done to its shape at scene time t: { move: [x, y, z], opacity, angle }. */
 export function animAt(a, t, T) {
   const out = { move: [0, 0, 0], opacity: 1, angle: null };
@@ -31,10 +40,8 @@ export function animAt(a, t, T) {
     case 'swing': out.angle = lerp(a.from ?? -20, a.to ?? 20, thereAndBack()); break;
     case 'spin': out.angle = turnOf(a) * 360 * p; break;
     case 'keys': {
-      const ks = [...(a.keys || [])].sort((x, y) => x.at - y.at);
+      const ks = normKeys(a, P);
       if (!ks.length) break;
-      if (ks[0].at > 0) ks.unshift({ ...ks[0], at: 0 });
-      if (ks[ks.length - 1].at < 1) ks.push({ ...ks[0], at: 1 });
       let op = 1;
       const filled = ks.map((k) => { if (k.opacity != null) op = k.opacity; return { ...k, move: k.move || [0, 0, 0], op, rotate: k.rotate ?? null }; });
       let i = filled.findIndex((k, j) => j < filled.length - 1 && p >= k.at && p <= filled[j + 1].at);
@@ -51,7 +58,7 @@ export function animAt(a, t, T) {
       out.move = [0, 1, 2].map((i) => Pl.U[i] * r * Math.cos(th) + Pl.V[i] * r * Math.sin(th));
       break;
     }
-    case 'show': { const f0 = a.from ?? 0, f1 = a.to ?? 1; out.opacity = (f1 > 1 ? p >= f0 || p < f1 - 1 : p >= f0 && p < f1) ? 1 : 0; break; }
+    case 'show': { const div = a.seconds ? P : 1, f0 = (a.from ?? 0) / div, f1 = a.to === 'wrap-first' ? 1 + (a.first || 0) / div : a.to == null ? 1 : a.to / div; out.opacity = (f1 > 1 ? p >= f0 || p < f1 - 1 : p >= f0 && p < f1) ? 1 : 0; break; }
     case 'blink': out.opacity = lerp(1, a.min ?? 0.25, 0.5 - 0.5 * Math.cos(2 * Math.PI * p)); break;
     default: break;
   }
@@ -110,7 +117,9 @@ export function makeProbe(sc, T) {
     // a slide across the floor is stored in screen pixels; turn it back into cells
     const a = mv[0] / AX[0], b = mv[1] / AX[1];
     const op = ob.tracks.opacity ? trackAt(ob.tracks.opacity, t) : ob.hidden ? 0 : 1;
-    return { x: ob.x + (a + b) / 2, y: ob.y + (b - a) / 2, z: ob.z - lf[1] / ZK, opacity: op };
+    // how much of the object stands above the floor (1 = all of it), for objects made with level and raised with s.grow
+    const gr = trackAt(ob.tracks.grow, t), level = gr ? 1 - gr[1] / (ob.h * UNIT) : ob.level ?? 1;
+    return { x: ob.x + (a + b) / 2, y: ob.y + (b - a) / 2, z: ob.z - lf[1] / ZK, opacity: op, level };
   };
 
   const find = (ref, partName) => {
@@ -174,7 +183,7 @@ export function makeProbe(sc, T) {
       }
       if (a.type === 'move' || a.type === 'keys') {
         lines.push(`  ${who}   ${a.type === 'move' ? 'there and back' : 'keyed sequence'}, every ${n2(P)} s${a.phase ? `, running ${n2(a.phase * P)} s ahead` : ''}${a.delay ? `, held back ${n2(a.delay)} s` : ''}`);
-        const marks = a.type === 'move' ? [0, 0.5] : [...new Set((a.keys || []).map((k) => clamp(k.at, 0, 1)))].sort((x, y) => x - y);
+        const marks = a.type === 'move' ? [0, 0.5] : [...new Set(normKeys(a, P).map((k) => clamp(k.at, 0, 1)))].sort((x, y) => x - y);
         let prev = null;
         for (const q of marks) {
           // the last key of a sequence falls on the instant it restarts: look just before, and call it the period's end
@@ -218,7 +227,7 @@ export function findCollisions(sc, T) {
     const named = [...here].reverse().find((n) => n.name);
     solids.push({ ob, box: primBox(p), all, moves: all.filter((a) => MOVES.includes(a.type)), fixedOrder, name: named ? named.name : null, kind: p.t === 'prism' ? 'shape' : p.t });
   });
-  for (const ob of sc.objs) if (!ob.hidden && !ob.opts.ghost && !(ob.opts.opacity < 0.2)) walk(ob, ob.parts, [], null);
+  for (const ob of sc.objs) if (!ob.hidden && !ob.free && !ob.opts.ghost && !(ob.opts.opacity < 0.2)) walk(ob, ob.parts, [], null);
   const movers = solids.filter((q) => q.moves.length);
   if (!movers.length) return [];
   const N = Math.min(240, Math.max(24, Math.ceil(T / 0.05))), TOL = 0.06;

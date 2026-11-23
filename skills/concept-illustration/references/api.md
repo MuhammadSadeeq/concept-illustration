@@ -43,7 +43,7 @@ Contents: [scene](#scene) · [looks](#looks) · [objects](#objects) · [custom o
 | `pad` | `56` | Margin around the content, in viewBox units (pixels at natural size): a number, `[sides, top-and-bottom]` or `[top, right, bottom, left]`. The frame covers every object over its whole motion (parts that slide, orbit and spin included) |
 | `series` | | An object of options shared by a set of scenes, with optional `kinds: { name: builder }` registered for you. This scene's own options win. See [delivery](delivery.md#series) |
 | `size` | from content | `[width, height]` in pixels: the image keeps exactly this size however the content changes, and the scene is fitted inside it. Use it wherever the image sits in a fixed slot on a page |
-| `loop` | story length | Minimum loop length in seconds |
+| `loop` | story length | Minimum loop length in seconds. If the story needs longer the loop grows, and the report says so |
 | `intro` | `true` | Objects rise into place once when the image loads |
 | `shadows` | `true` | Ground shadows |
 | `font` | system sans | `'mono'`, `'serif'`, `'round'`, or any CSS `font-family` |
@@ -159,7 +159,7 @@ const around = s.ring(5, { at: [0, 0], r: 4.6, start: -90 });          // degree
 | `route` | `'auto'` | `'auto'` straight when aligned, otherwise one or two turns · `'x'` leave along x then turn · `'y'` leave along y then turn · `'straight'` a direct diagonal |
 | `via` | | Waypoints `[[x, y], ...]` to steer around something |
 | `arc` | | `true` or a height in cells: a hop through the air from top to top |
-| `flow` | | `true` or `{ count, speed, color }`: dots stream along the link continuously. `'alternate'` or `{ alternate: true, period, swing, phase }`: the dots rock to and fro in step instead (alternating current, a tide, a two-way exchange); `swing` is how far each way, in cells |
+| `flow` | | `true` or `{ count, speed, color, reverse, jitter, r }`: dots stream along the link continuously. `reverse: true` sends them from b to a; `jitter: 0.07` makes them jostle sideways as they go (cells); `speed` is in cells per second; `r` is their radius in cells. `'alternate'` or `{ alternate: true, period, swing, phase }`: the dots rock to and fro in step instead (alternating current, a tide, a two-way exchange); `swing` is how far each way, in cells |
 | `label` | | Small caption at the middle |
 | `dim` | | Draw the line fainter, for secondary links. Its label keeps full strength |
 | `color`, `width` | from the look | Overrides |
@@ -168,6 +168,17 @@ const around = s.ring(5, { at: [0, 0], r: 4.6, start: -90 });          // degree
 One link serves both directions: `s.send(b, a)` rides a link drawn with `s.link(a, b)`.
 
 A link that meets an object on a far side stops where the object's outline begins, so its arrowhead stays visible.
+
+## Shapes that are not objects
+
+```js
+s.draw((sh, K) => [sh.arrow({ from: [0, 5, 0], to: [3, 5, 0], color: 'gold' }), sh.ripple({ x: 2, y: 2, r: 1.2 })]);
+s.draw((sh) => [sh.stream({ points: [[0, 0, 2], [6, 0, 2]], count: 12 })], { layer: 'air' });
+```
+
+`s.draw(shapes, options)` puts shapes straight into the scene, in scene cells. Use it for arrows, guides, field lines, ripples and particles that run round or between the objects. Unlike an object, a drawing takes up no room: it has no footprint and no shadow, labels and links ignore it, and it is never reported as overlapping. `layer` is `'floor'` (default: under the objects), `'air'` (over them) or `'sorted'` (in among them by depth). It returns a handle that the story can `s.show`, `s.hide` or `s.pop` (create it with `hidden: true`).
+
+Anything a viewer should read as a thing in the scene is still an object: `s.add` or `s.custom`.
 
 ## Zones, floor text, callouts
 
@@ -210,7 +221,7 @@ Every step also takes `at: seconds`: it then starts at that moment on the scene 
 | Step | Options | What it shows |
 | --- | --- | --- |
 | `s.send(a, b, o)` | `as` token, `color`, `label`, `count`, `stagger`, `speed`, `arc`, `route`, `via`, `stay`, `id`, `scale`, `react: false` | A token travels a to b. It follows the link between them (in either direction); with no link it crosses open floor and the report says so. `label` is a word that rides above the token once it has left the sender. The receiver gives a small bounce on arrival |
-| `s.zoom(target, k, o)` | `ease` | The camera moves in `k` times closer on an object or a point `[x, y, z]`. `s.zoom()` returns to the whole scene, and the view also returns by itself before the loop restarts. The backdrop, heading and captions stay put; object labels step aside while the camera is in close, and callouts keep their size |
+| `s.zoom(target, k, o)` | `hold`, `ease` | The camera moves in `k` times closer on an object or a point `[x, y, z]`. With `hold: seconds` it stays that long and comes back out, all in one step, and the next step waits for it. Without `hold` it stays in until `s.zoom()`, or until just before the loop restarts. The backdrop, heading and captions stay put; object labels step aside while the camera is in close, and callouts keep their size |
 | `s.pulse(obj, o)` | `color` | Ripple on the floor and a bounce |
 | `s.glow(obj, o)` | `color`, `keep: true` | Floor light fades in, holds, fades out (or stays with `keep`) |
 | `s.tint(obj, color)` | | Cross-fade to another colour until the loop restarts |
@@ -259,7 +270,7 @@ node SKILL_DIR/scripts/build.mjs <file>.scene.mjs [options]
 | Option | Effect |
 | --- | --- |
 | `--out DIR` | Write outputs to DIR (default: next to the script) |
-| `--sheet` `--frames N` | Also write `<name>.sheet.png`: up to N frames (default 8) taken at the story's key moments. `--frames 2.3,2.6` takes exactly those moments (seconds on the scene clock), shown large |
+| `--sheet` `--frames N` | Also write `<name>.sheet.png`: up to N frames (default 8) taken at the story's key moments; ask for more (`--frames 14`) when a quick event falls between them. `--frames 2.3,2.6` takes exactly those moments (seconds on the scene clock), shown large, and writes `<name>.frames.png` so the full sheet is kept |
 | `--trails [SEC]` | On the sheet, lay a faint trail behind everything that moved in the last SEC seconds (default 0.3), so a still frame shows direction |
 | `--focus ID` `--focus x,y,z` `--zoom N` | Crop the sheet and PNG to one object (its id is printed by `--motion` and in errors) or around a point, optionally N times closer |
 | `--motion` | Print the story's timeline and every self-moving part: where it is at each key moment and which way it goes in the picture |
@@ -303,6 +314,6 @@ s.expect([0, 12], (at) => at(arm, 'head').z > 0.5, 'the head never touches the p
 s.expect(1.5, (at) => Math.abs(at('needle').angle) < 5, 'the needle is centred when the coil is upright');
 ```
 
-`at(ref, part)` returns `{ x, y, z, opacity, angle }` at that time: `x, y, z` in cells (the centre of the shape, or the origin of an object), `angle` in degrees for artwork that turns. `ref` is an object handle, an object id, or the `name` given to a shape, group or artwork item; pass an object and a name when two objects have parts with the same name. The build evaluates the same easing and timing the browser will, and lists any expectation that is false under FIX THESE, with the values it found. Tokens sent with `s.send` are not addressable.
+`at(ref, part)` returns `{ x, y, z, opacity, angle, level }` at that time (`level` is how much of an object stands above the floor, 0 to 1, for objects raised with `s.grow`): `x, y, z` in cells (the centre of the shape, or the origin of an object), `angle` in degrees for artwork that turns. `ref` is an object handle, an object id, or the `name` given to a shape, group or artwork item; pass an object and a name when two objects have parts with the same name. The build evaluates the same easing and timing the browser will, and lists any expectation that is false under FIX THESE, with the values it found. Tokens sent with `s.send` are not addressable.
 
 The report is produced from the scene's geometry and timing: objects that intersect, links that run under objects or kink, labels that collide, hidden objects never revealed, crowding, missing focal point, missing motion, extreme proportions and over-long loops, moving parts that pass through other shapes, text too small to read, unusually large files, and any `s.expect` that is false. [Checking](checking.md) lists them and gives the procedure. It does not judge whether the picture makes its point, and it does not inspect every frame of the animation. Use the sheet or the preview for that.

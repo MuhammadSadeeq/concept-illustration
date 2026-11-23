@@ -11,7 +11,7 @@ import { buildPath, pointAt, reversePath } from './links.mjs';
 import { Track, keyframes, snapPeriod, schedule, EASE, EASE_FN } from './motion.mjs';
 import { rgba, mix } from './color.mjs';
 import { ICONS } from './icons.mjs';
-import { makeProbe, findCollisions } from './probe.mjs';
+import { makeProbe, findCollisions, normKeys } from './probe.mjs';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
@@ -39,7 +39,7 @@ export function compile(sc) {
   const note = (level, code, msg) => notes.push({ level, code, msg });
   const defs = new Map();
   const kfs = new Map();
-  for (const ob of sc.objs) { ob.tracks = {}; ob.tints = []; ob.marks = []; }
+  for (const ob of sc.objs) { ob.tracks = {}; ob.tints = []; ob.marks = []; ob.movedTo = null; }
 
   const def = (key, make) => {
     if (!defs.has(key)) { const id = `${uid}-d${defs.size.toString(36)}`; defs.set(key, { id, svg: make(id) }); }
@@ -54,6 +54,7 @@ export function compile(sc) {
 
   const speed = sc.storyOpts.speed ?? 3.4;
   const movers = [], rings = [], captions = [], keyTimes = [], timeline = [], cameraSteps = [];
+  const flows = [], nameOf = (end) => (end && end.obj ? end.obj.id : 'a point');
   let T = o.loop ?? 6;
   const sameEnd = (a, b) => (a.obj && b.obj ? a.obj === b.obj : !a.obj && !b.obj && Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6);
   const pathFor = (st) => {
@@ -75,6 +76,7 @@ export function compile(sc) {
   if (sc.steps) {
     const durOf = (st) => {
       if (st.type === 'move') { const cur = st.obj; return clamp(Math.hypot(st.to[0] - cur.x, st.to[1] - cur.y) / (st.speed ?? speed), 0.5, 2.6); }
+      if (st.type === 'zoom' && st.hold != null && st.to) return 2.2 + Math.max(0, +st.hold); // in, stay, out
       if (st.type !== 'send') return undefined;
       st._path = pathFor(st);
       const n = st.count ?? 1;
@@ -84,6 +86,7 @@ export function compile(sc) {
     // the last caption also gets its reading time before the loop restarts
     T = Math.max(end + (sc.storyOpts.hold ?? 0.9), read.since + read.need + 0.6, o.loop ?? 0);
     T = Math.ceil(T * 10) / 10;
+    if (o.loop && T > o.loop + 0.05) note('hint', 'loop-longer', `loop: ${o.loop} was asked for, but the story needs ${r1(T)} s, so the loop is ${r1(T)} s. Anything timed against the loop (a period, a readout, a series of scenes meant to match) should use ${r1(T)}, or shorten the story.`);
     for (const st of items) {
       const who = (x) => (x && x.obj ? x.obj.id : x && x._iso ? x.id : Array.isArray(x) ? `[${x.join(', ')}]` : '');
       timeline.push({ t0: st.t0, t1: st.t1, text: st.type === 'say' ? `caption "${st.text}"` : st.type === 'send' ? `send ${who(st.from)} → ${who(st.to)}${st.as ? ` as ${st.as}` : ''}` : st.type === 'wait' ? 'wait' : st.type === 'zoom' ? (st.to ? `zoom in ${st.k}× on ${st.to._iso ? st.to.id : `[${st.to.join(', ')}]`}` : 'zoom back out') : `${st.type} ${who(st.obj)}${st.type === 'move' ? ` to [${st.to.join(', ')}]` : ''}` });
@@ -116,7 +119,14 @@ export function compile(sc) {
           break;
         case 'show': track(ob, 'opacity', 'opacity', ob.hidden ? 0 : 1).to(st.t0, st.t1, 1, 'smooth'); break;
         case 'hide': track(ob, 'opacity', 'opacity', ob.hidden ? 0 : 1).to(st.t0, st.t1, 0, 'smooth'); break;
-        case 'zoom': cameraSteps.push({ t0: st.t0, t1: st.t1, k: st.k, ease: st.ease || 'inOut', focus: !st.to ? null : st.to._iso ? [st.to.x, st.to.y, st.to.z + st.to.h / 2] : [st.to[0], st.to[1], st.to[2] || 0] }); keyTimes.push(st.t1 + 0.1); break;
+        case 'zoom': {
+          const focus = !st.to ? null : st.to._iso ? [st.to.x, st.to.y, st.to.z + st.to.h / 2] : [st.to[0], st.to[1], st.to[2] || 0];
+          const both = st.hold != null && focus; // one step that goes in, stays and comes back
+          cameraSteps.push({ t0: st.t0, t1: both ? st.t0 + 1.1 : st.t1, k: st.k, ease: st.ease || 'inOut', focus });
+          if (both) cameraSteps.push({ t0: st.t1 - 1.1, t1: st.t1, k: 1, ease: st.ease || 'inOut', focus: null });
+          keyTimes.push((both ? st.t0 + 1.1 : st.t1) + 0.15);
+          break;
+        }
         case 'lift': track(ob, 'lift', 'translate', [0, 0]).to(st.t0, st.t1, [0, -st.dz * UNIT], 'inOut'); break;
         case 'drop': track(ob, 'lift', 'translate', [0, 0]).to(st.t0, st.t1, [0, 0], 'inOut'); break;
         case 'tint': {
@@ -142,6 +152,7 @@ export function compile(sc) {
         case 'move': {
           const [ax, ay] = proj(ob.x, ob.y, ob.z), [bx, by] = proj(st.to[0], st.to[1], ob.z + (st.to[2] || 0));
           track(ob, 'move', 'translate', [0, 0]).to(st.t0, st.t1, [bx - ax, by - ay], st.ease || 'inOut');
+          (ob.movedTo || (ob.movedTo = [])).push([st.to[0] - ob.x, st.to[1] - ob.y, st.to[2] || 0]);
           break;
         }
         case 'grow': {
@@ -203,6 +214,16 @@ export function compile(sc) {
     return `animation:${kf(css)} ${r2(period)}s ${ease} ${r2(d)}s infinite${extra} both`;
   };
   const storyStyle = (css) => loopStyle(css, { delay: introEnd, raw: true });
+  // jostling: a few short, jerky side-steps shared between any number of particles
+  const rnd = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+  const jostle = (cells) => {
+    const jpx = cells * UNIT;
+    return {
+      css: [0, 1, 2].map((v) => `0%{transform:translate(0px,0px)}${Array.from({ length: 6 }, (_, k) => `${r2(((k + 1) / 7) * 100)}%{transform:translate(${r2((rnd(v * 10 + k) - 0.5) * 2 * jpx)}px,${r2((rnd(v * 10 + k + 50) - 0.5) * 2 * jpx)}px)}`).join('')}100%{transform:translate(0px,0px)}`),
+      P: [0.55, 0.7, 0.9].map((q) => snapPeriod(q, T)),
+      wrap: function (dot, i) { return `<g style="${loopStyle(this.css[i % 3], { period: this.P[i % 3], delay: -rnd(i + 7) * this.P[i % 3] })}">${dot}</g>`; },
+    };
+  };
   // phase runs a part ahead (a fraction of its period already done at time 0); delay holds it back (seconds)
   const lagOf = (a, P) => -(a.phase || 0) * P + (a.delay || 0);
   // which way a turn goes, as it appears in the picture: 'cw' clockwise, 'ccw' anticlockwise
@@ -260,10 +281,8 @@ export function compile(sc) {
         case 'keys': {
           // a keyframed sequence: keys: [{ at: 0..1, move, rotate, scale, opacity, ease }]
           const P = snapPeriod(a.period || 4, T);
-          const ks = [...(a.keys || [])].sort((x, y) => x.at - y.at);
+          const ks = normKeys(a, P);
           if (!ks.length) return '';
-          if (ks[0].at > 0) ks.unshift({ ...ks[0], at: 0 });
-          if (ks[ks.length - 1].at < 1) ks.push({ ...ks[0], at: 1 });
           const main = loopStyle(ks.map((k) => `${r2(clamp(k.at, 0, 1) * 100)}%{${tf(k)};animation-timing-function:${EASE[k.ease] || EASE.inOut}}`).join(''), { period: P, delay: lagOf(a, P) });
           if (!a.fade) return main;
           // fade: the part slips out just before its sequence restarts and back in after, hiding the jump
@@ -286,7 +305,8 @@ export function compile(sc) {
         }
         case 'show': {
           // visible only between two fractions of the period, switching at once (an interval past 1 wraps round)
-          const P = snapPeriod(a.period || T, T), f0 = clamp(a.from ?? 0, 0, 1), f1 = a.to ?? 1;
+          const P = snapPeriod(a.period || T, T), div = a.seconds ? P : 1;
+          const f0 = clamp((a.from ?? 0) / div, 0, 1), f1 = a.to === 'wrap-first' ? 1 + (a.first || 0) / div : a.to == null ? 1 : a.to / div;
           const css = f1 > 1
             ? `0%{opacity:1}${r2((f1 - 1) * 100)}%{opacity:0}${r2(f0 * 100)}%{opacity:1}100%{opacity:1}`
             : `0%{opacity:${f0 <= 0 ? 1 : 0}}${f0 > 0 ? `${r2(f0 * 100)}%{opacity:1}` : ''}${f1 < 1 ? `${r2(f1 * 100)}%{opacity:0}` : ''}100%{opacity:${f1 >= 1 ? 1 : 0}}`;
@@ -341,15 +361,11 @@ export function compile(sc) {
       const stops = (back ? [...verts].reverse().map((q) => ({ v: q.v, d: total - q.d })) : verts).map((q) => [(q.d / total) * P, projP(q.v)]);
       const css = keyframes('translate', stops, P);
       const fade = p.closed ? '' : keyframes('opacity', [[0, 0], [P * 0.06, 1], [P * 0.94, 1], [P, 0]], P);
-      // jostling: a few short, jerky side-steps shared between the particles
-      const rnd = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
-      const jpx = (p.jitter ?? 0.1) * UNIT;
-      const jit = mode === 'zigzag' ? [0, 1, 2].map((v) => `0%{transform:translate(0px,0px)}${Array.from({ length: 6 }, (_, k) => `${r2(((k + 1) / 7) * 100)}%{transform:translate(${r2((rnd(v * 10 + k) - 0.5) * 2 * jpx)}px,${r2((rnd(v * 10 + k + 50) - 0.5) * 2 * jpx)}px)}`).join('')}100%{transform:translate(0px,0px)}`) : null;
-      const Pj = [0.55, 0.7, 0.9].map((q) => snapPeriod(q, T));
+      const jit = mode === 'zigzag' ? jostle(p.jitter ?? 0.1) : null;
       for (let i = 0; i < count; i++) {
         const delay = lag - (i / count) * P;
         const [px, py] = projP(at3((back ? 1 - i / count : i / count) * total).pos); // where it rests when motion is off
-        const inner = jit ? `<g style="${loopStyle(jit[i % 3], { period: Pj[i % 3], delay: -rnd(i + 7) * Pj[i % 3] })}">${dot}</g>` : dot;
+        const inner = jit ? jit.wrap(dot, i) : dot;
         out += `<g transform="translate(${r1(px)} ${r1(py)})" style="${join(loopStyle(css, { period: P, delay }), fade && loopStyle(fade, { period: P, delay }))}">${inner}</g>`;
       }
       return out;
@@ -461,6 +477,7 @@ export function compile(sc) {
   const hiddenAttr = (ob) => (ob.hidden ? ' opacity="0"' : '');
 
   const shadowOf = (ob) => {
+    if (ob.free) return '';
     if (ob.opts.ghost) {
       // a ghost stands for something absent or still to come: no shadow, a dashed footprint instead
       const gw = ob.res.w * ob.k + 0.3, gd = ob.res.d * ob.k + 0.3;
@@ -603,6 +620,7 @@ export function compile(sc) {
     if (flow === 'alternate' || (flow && flow.alternate)) {
       // alternating flow: every dot rocks back and forth about its own place, all in step
       const fo = typeof flow === 'object' ? flow : {};
+      flows.push(`${nameOf(lk.a)} → ${nameOf(lk.b)}   dots rock to and fro in place, once every ${r1(fo.period ?? 2)} s`);
       const P = snapPeriod(fo.period ?? 2, T);
       const count = fo.count ?? Math.max(2, Math.round(path.total / 0.8));
       const amp = (fo.swing ?? 0.3) / path.total, ph = (fo.phase || 0) * 2 * Math.PI;
@@ -616,18 +634,24 @@ export function compile(sc) {
         dots += `<g transform="translate(${r1(pos[0])} ${r1(pos[1])})" style="${loopStyle(css, { period: P })}">${glowDot}<circle r="2.6" fill="${dotColor}"${th.outline ? ` stroke="${th.ink}" stroke-width="1"` : ''}/></g>`;
       }
     } else if (flow) {
+      // reverse: the dots travel from b to a; jitter: they jostle sideways as they go (cells)
       const fo = typeof flow === 'object' ? flow : {};
-      const count = fo.count ?? Math.max(1, Math.round(path.total / 2.6));
+      flows.push(`${nameOf(lk.a)} → ${nameOf(lk.b)}   dots travel ${fo.reverse ? `backwards, from ${nameOf(lk.b)} to ${nameOf(lk.a)}` : `from ${nameOf(lk.a)} to ${nameOf(lk.b)}`}${fo.jitter ? ', jostling' : ''}, ${r1(path.total / (fo.speed ?? 2.4))} s end to end`);
+      const count = fo.count ?? Math.max(1, Math.round(path.total / (fo.jitter ? 0.7 : 2.6)));
       const P = snapPeriod(path.total / (fo.speed ?? 2.4), T);
-      const stops = flat.map((f, i) => [(path.lens[i] / path.total) * P, projP(f.p)]);
+      const frac = (f) => (fo.reverse ? 1 - f : f);
+      const stops = (fo.reverse ? [...flat].map((f, i) => ({ f, d: path.lens[i] })).reverse().map((q) => [(1 - q.d / path.total) * P, projP(q.f.p)]) : flat.map((f, i) => [(path.lens[i] / path.total) * P, projP(f.p)]));
       const css = keyframes('translate', stops, P);
       const fade = keyframes('opacity', [[0, 0], [P * 0.08, 1], [P * 0.9, 1], [P, 0]], P);
       const dotColor = fo.color ? K.hex(fo.color) : th.glow > 0 ? mix(color, '#ffffff', 0.35) : K.hex('accent');
+      const jit = fo.jitter ? jostle(fo.jitter === true ? 0.08 : fo.jitter) : null;
+      const rad = fo.r != null ? fo.r * UNIT : lo.style === 'pipe' ? 4 : fo.jitter ? 2.6 : 3.2;
       for (let i = 0; i < count; i++) {
         const delay = -((i + 0.5) / count) * P;
-        const pos = projP(pointAt(path, (i + 0.5) / count));
-        const glowDot = th.glow > 0 ? `<circle r="9" fill="url(#${glowGrad(dotColor, 0.8)})"/>` : '';
-        dots += `<g transform="translate(${r1(pos[0])} ${r1(pos[1])})" style="${join(loopStyle(css, { period: P, delay }), loopStyle(fade, { period: P, delay }))}">${glowDot}<circle r="${lo.style === 'pipe' ? 4 : 3.2}" fill="${dotColor}"${th.outline ? ` stroke="${th.ink}" stroke-width="1.2"` : ''}/></g>`;
+        const pos = projP(pointAt(path, frac((i + 0.5) / count)));
+        const glowDot = th.glow > 0 ? `<circle r="${r1(rad * 2.8)}" fill="url(#${glowGrad(dotColor, 0.8)})"/>` : '';
+        const dot = `${glowDot}<circle r="${r1(rad)}" fill="${dotColor}"${th.outline ? ` stroke="${th.ink}" stroke-width="1.2"` : ''}/>`;
+        dots += `<g transform="translate(${r1(pos[0])} ${r1(pos[1])})" style="${join(loopStyle(css, { period: P, delay }), loopStyle(fade, { period: P, delay }))}">${jit ? jit.wrap(dot, i) : dot}</g>`;
       }
     }
     if (rich && !path.arc && lk.a.obj && lo.style !== 'road' && lo.style !== 'pipe' && lo.arrow !== 'both') {
@@ -651,7 +675,7 @@ export function compile(sc) {
     // lint: a route that runs under an object
     if (!path.arc) {
       for (const ob of sc.objs) {
-        if (ob === lk.a.obj || ob === lk.b.obj || ob.parent || ob.z > 0.3) continue;
+        if (ob === lk.a.obj || ob === lk.b.obj || ob.parent || ob.free || ob.z > 0.3) continue;
         let hit = false;
         for (let i = 1; i < flat.length && !hit; i++) {
           const a = flat[i - 1].p, b = flat[i].p;
@@ -705,7 +729,8 @@ export function compile(sc) {
     const svg = `${stackedShadow.get(ob) || ''}<g transform="translate(${r1(sx)} ${r1(sy)})"${meta}>${inner}</g>`;
     let box = ob.box;
     if (ob.float) box = { ...box, z1: box.z1 + 0.2 };
-    world.push({ aabb: box, svg, ob });
+    // shapes that are not objects are drawn under the objects, over them, or in among them, as asked
+    if (ob.free && ob.layer === 'floor') floorFx += svg; else if (ob.free && ob.layer === 'air') air += svg; else world.push({ aabb: box, svg, ob });
     const sb = aabbScreen(box);
     const liftPx = ob.tracks.lift ? Math.max(0, ...ob.tracks.lift.segs.map((s) => -s.to[1])) : 0;
     grow({ x0: sb.x0, x1: sb.x1, y0: sb.y0 - liftPx - (ob.float ? 8 : 0), y1: sb.y1 });
@@ -859,7 +884,8 @@ export function compile(sc) {
     }
     overlay += steady(one, ax, ay);
   }
-  const solid = sc.objs.filter((ob) => !ob.hidden).map((ob) => ({ ob, box: growBox(aabbScreen(ob.box), -5) }));
+  // labels keep clear of every object, including ones that only appear later in the story
+  const solid = sc.objs.filter((ob) => !ob.free).map((ob) => ({ ob, box: growBox(aabbScreen(ob.box), -5) }));
   const LS = 14, SS = 11.5;
   // points along every floor link, so labels can keep clear of them
   const linkDots = [];
@@ -1056,11 +1082,13 @@ export function compile(sc) {
 
   // ================================================================ 7. lint
 
-  const vis = sc.objs.filter((ob) => !ob.hidden);
+  const vis = sc.objs.filter((ob) => !ob.hidden && !ob.free);
+  // an object sunk into the floor only takes up the part of its height that shows
+  const standing = (ob) => (ob.level < 1 ? { ...ob.box, z1: ob.box.z0 + (ob.box.z1 - ob.box.z0) * Math.max(0.02, ob.level) } : ob.box);
   for (let i = 0; i < sc.objs.length; i++) for (let j = i + 1; j < sc.objs.length; j++) {
     const a = sc.objs[i], b = sc.objs[j];
-    if (a.parent === b || b.parent === a || (a.hidden !== b.hidden)) continue;
-    if (aabbIntersects(a.box, b.box, 0.04)) note('warn', 'overlap', `"${a.id}" and "${b.id}" occupy the same space, so they will cut into each other. Move one of them (they need about ${r1((a.w + b.w) / 2 + 0.4)} cells between centres along x, or ${r1((a.d + b.d) / 2 + 0.4)} along y), or stack with on:.`);
+    if (a.parent === b || b.parent === a || (a.hidden !== b.hidden) || a.free || b.free) continue;
+    if (aabbIntersects(standing(a), standing(b), 0.04)) note('warn', 'overlap', `"${a.id}" and "${b.id}" occupy the same space, so they will cut into each other. Move one of them (they need about ${r1((a.w + b.w) / 2 + 0.4)} cells between centres along x, or ${r1((a.d + b.d) / 2 + 0.4)} along y), or stack with on:.`);
   }
   if (vis.length > 16) note('warn', 'crowded', `${vis.length} objects is a lot for one picture. The clearest scenes use 3–9 objects; cut supporting detail or split the idea into two scenes.`);
   else if (vis.length > 11) note('hint', 'crowded', `${vis.length} objects: check that each one is needed to explain the idea.`);
@@ -1081,7 +1109,32 @@ export function compile(sc) {
   // ================================================================ 8. assemble
 
   const hazeSvg = o.background && o.haze !== false && th.haze > 0 && H > 320 ? `<rect x="${vb.x0}" y="${vb.y0}" width="${W}" height="${Math.round(H * 0.5)}" fill="url(#${def('haze', (id) => `<linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${th.bg.to}" stop-opacity="${typeof o.haze === 'number' ? o.haze : th.haze}"/><stop offset="1" stop-color="${th.bg.to}" stop-opacity="0"/></linearGradient>`)})" pointer-events="none"/>` : '';
-  const sortedWorld = depthSort(world).map((w) => w.svg).join('');
+  const worldOrder = depthSort(world);
+  const sortedWorld = worldOrder.map((w) => w.svg).join('');
+  // An object that slides keeps the drawing order of the place it started. If it ends up in front of
+  // something it is drawn behind (or the other way round), it will look wrong when it gets there.
+  {
+    const rank = new Map(worldOrder.map((w, i) => [w.ob, i]));
+    const eps = 0.011, seenPairs = new Set();
+    for (const a of sc.objs) {
+      if (!a.movedTo || a.free || !rank.has(a)) continue;
+      for (const d of a.movedTo) {
+        const A = aabbShift(a.box, d);
+        for (const b of sc.objs) {
+          if (b === a || b.free || b.hidden || b.parent === a || a.parent === b || !rank.has(b) || seenPairs.has(b)) continue;
+          const B = b.box;
+          if (!boxesOverlap(aabbScreen(A), aabbScreen(B))) continue;
+          const aFront = A.x1 > B.x0 + eps && A.y1 > B.y0 + eps && A.z1 > B.z0 + eps, bFront = B.x1 > A.x0 + eps && B.y1 > A.y0 + eps && B.z1 > A.z0 + eps;
+          if (aFront === bFront) continue;
+          const drawnInFront = rank.get(a) > rank.get(b);
+          if (drawnInFront !== aFront) {
+            seenPairs.add(b);
+            note('warn', 'move-depth', `"${a.id}" moves ${aFront ? 'in front of' : 'behind'} "${b.id}" but will be drawn ${aFront ? 'behind' : 'in front of'} it, because an object that slides keeps the drawing order of the place where it starts. Start "${a.id}" where it ends and move it the other way; or lay the scene out so it starts ${aFront ? 'nearer the viewer (larger x + y)' : 'further from the viewer (smaller x + y)'} than "${b.id}"; or make the trip a token instead: s.send(from, to, { as: '${a.kind}' }).`);
+          }
+        }
+      }
+    }
+  }
   const fadeIn = (delay, dur = 0.5) => (o.intro ? `animation:${kf('from{opacity:0}to{opacity:1}')} ${dur}s ease-out ${r2(delay)}s both` : '');
   // the camera: one transform over everything in the scene, leaving backdrop, heading and captions where they are
   let cameraOpen = '';
@@ -1132,5 +1185,5 @@ export function compile(sc) {
     note('hint', 'large', `The SVG is ${Math.round(svg.length / 1024)} KB; most scenes are 30 to 80. ${Math.round(kfBytes / 1024)} KB of it is ${kfCount} sets of keyframes${heavy.length ? `, and the heaviest objects are ${heavy.map((w) => `${w.id} (${Math.round(w.kb)} KB)`).join(' and ')}` : ''}. Many separately keyed dots are the usual cause: sh.stream, or flow on a link, moves any number of particles with a handful of shared keyframes.`);
   }
 
-  return { svg, width: outW, height: outH, loop: T, intro: introEnd, notes, objects: sc.objs.length, bytes: svg.length, motion: () => ({ timeline, parts: probe.report() }) };
+  return { svg, width: outW, height: outH, loop: T, intro: introEnd, notes, objects: sc.objs.length, bytes: svg.length, motion: () => ({ timeline, parts: probe.report(), flows }) };
 }

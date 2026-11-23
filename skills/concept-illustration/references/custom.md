@@ -26,7 +26,9 @@ const logo = s.svg('<circle cx="50" cy="50" r="46" fill="#ff5a1f"/>', { at: [8, 
 
 The builder receives `o` (the options passed to `s.add`, with `color` and `accent` filled in), `sh` (the shapes below) and `K` (colours: `K.hex('accent')` gives a palette colour as hex, `K.mat('body').on` gives a readable ink colour for artwork on that surface, `K.theme.dark` tells you whether the look is dark).
 
-Coordinates inside a builder are in grid cells **relative to the object's own origin**, which is the centre of its footprint on the floor. `x` runs toward the lower-right of the picture, `y` toward the lower-left, `z` up. Size is measured from the shapes; return `w`, `d`, `h` only to override it, and `round: true` for a circular footprint (rounder shadow and ripple).
+An object is referred to by its `id` (`s.custom({ id: 'pump', ... })`); a shape inside it by `name` (`sh.box({ name: 'piston', ... })`). On an object, `name` is read as its label.
+
+Coordinates inside a builder are in grid cells **relative to the object's own origin**, which is the centre of its footprint on the floor. `x` runs toward the lower-right of the picture, `y` toward the lower-left, `z` up. Size is measured from the shapes; return `w`, `d`, `h` only to override the footprint that links, labels and the shadow use, and `round: true` for a circular footprint (rounder shadow and ripple). The overlap check always uses the real shapes, so an object cannot be made to take less room than it does: shapes that should take no room at all (arrows, particle paths, guides) belong in `s.draw`, not in an object.
 
 ## Shapes
 
@@ -83,7 +85,7 @@ Items:
 { t: 'readout', x, y, size: 0.3, fill, values: [[0, '0'], [0.4, '9'], [0.7, '27']] }  // text that changes: each shows until the next
 ```
 
-`fill`, `stroke` and `color` take palette roles (`'accent'`, `'gold'`, `'danger'`, `'paper'`, `'screen'`, ...) as well as hex colours. In `levels` and `values`, `at` runs from 0 to 1 across the `period` (the whole loop when none is given). Text under 0.24 cells is too small to read; the report says so.
+`fill`, `stroke` and `color` take palette roles (`'accent'`, `'gold'`, `'danger'`, `'paper'`, `'screen'`, ...) as well as hex colours. In `levels` and `values`, `at` runs from 0 to 1 across the `period` (the whole loop when none is given); add `seconds: true` to the item to give the times in seconds instead, which is easier to keep in step with captions. Text under 0.24 cells is too small to read; the report says so.
 
 Any item also takes `fillOp` (fill opacity), `op` (opacity), `fade: [x1, y1, x2, y2]` (the fill fades out from the first point to the second) and `anim`.
 
@@ -114,7 +116,7 @@ Mechanisms, on shapes, groups and artwork:
 
 Every type takes `period`, plus `delay` (seconds: the part does everything that much later) or `phase` (0 to 1: that fraction of its period is already done at second 0, so the part runs *ahead*). To make B follow A by one second, give B `delay: 1`.
 
-Each key is `{ at, move, rotate, scale, opacity, ease }`. On `keys`, `fade: true` slips the part out just before its sequence restarts and back in after, which hides the jump when the last key is not where the first one is. `at` runs from 0 to 1 across the period. `move` is `[x, y, z]` in cells from where the part was drawn (on a face artwork item: `[x, y]` in the face's own units). `move` and `opacity` work on shapes, groups and artwork items; `rotate` (degrees) and `scale` work on artwork items only. `ease` shapes the journey to the *next* key: `inOut` (default), `in` (gathers speed, for something falling or leaving), `out` (settles, for something arriving), `back` (overshoots and returns), `linear` (a belt).
+Each key is `{ at, move, rotate, scale, opacity, ease }`; write `t: seconds` instead of `at` to place a key by the clock. On `keys`, `fade: true` slips the part out just before its sequence restarts and back in after, which hides the jump when the last key is not where the first one is. `at` runs from 0 to 1 across the period. `move` is `[x, y, z]` in cells from where the part was drawn (on a face artwork item: `[x, y]` in the face's own units). `move` and `opacity` work on shapes, groups and artwork items; `rotate` (degrees) and `scale` work on artwork items only. `ease` shapes the journey to the *next* key: `inOut` (default), `in` (gathers speed, for something falling or leaving), `out` (settles, for something arriving), `back` (overshoots and returns), `linear` (a belt).
 
 A complete small mechanism, a gate that opens for each request. Every part is held by something, both moving parts share one clock, and the gate is open before the request reaches it:
 
@@ -200,7 +202,7 @@ sh.stream({ points: [[-3, 0, 1], [3, 0, 1]], mode: 'zigzag', jitter: 0.12, perio
 | `wavelength` | `'alternate'` only: each particle lags the one before so that a wave of this length (cells) travels along the path |
 | `jitter` | `'zigzag'` only: how far the particles are knocked about, in cells |
 
-On the floor between objects, `s.link(a, b, { flow: true })` or `flow: 'alternate'` does the same job with less work. `examples/sound-wave.scene.mjs` uses streams for the air, a `bar` gauge and a `readout`.
+Between objects, a link with a flow does the same job with less work and joins up with the objects by itself: `s.link(a, b, { flow: true })`, `flow: 'alternate'`, or `flow: { reverse: true, jitter: 0.07, speed: 0.6 }`. A stream that runs round or between objects goes in `s.draw`, so that it is not treated as an object in their way. `examples/sound-wave.scene.mjs` uses streams for the air, a `bar` gauge and a `readout`.
 
 For `spin`, put the rotating artwork in a group whose `tx`, `ty` is the centre of rotation and draw the items around `0, 0`:
 

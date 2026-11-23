@@ -144,6 +144,9 @@ export function schedule(steps, t0, gap, durOf, parallel = false, read = { since
     if (!st) continue;
     let start = parallel ? t0 : t;
     if (Array.isArray(st)) {
+      // a caption inside a group must arrive with the things it describes: if the caption before it
+      // still needs reading time, the whole group waits, not the caption alone
+      if (st.some((x) => x && !Array.isArray(x) && x.type === 'say' && x.at == null) && start - read.since < read.need) { start = read.since + read.need; if (!parallel) t = start; }
       const sub = schedule(st, start, gap, durOf, !parallel, read);
       out.push(...sub.items);
       if (parallel) end = Math.max(end, sub.end); else { t = sub.end + gap; end = sub.end; }

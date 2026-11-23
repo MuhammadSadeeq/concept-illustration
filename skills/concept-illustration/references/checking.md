@@ -14,6 +14,8 @@ Every build prints a report. **FIX THESE** are defects; **CONSIDER** are judgeme
 | Crowding, no focal point, nothing moving, hidden things never shown | `crowded` `no-hero` `static` `never-shown` |
 | Captions too short to read or too long | `caption-rushed` `caption-long` |
 | A moving part that passes through another shape at some moment of the loop | `passes-through` |
+| An object moved with `s.move` that ends up in front of something it is drawn behind, or the reverse | `move-depth` |
+| A story longer than the `loop` that was asked for | `loop-longer` |
 | Text on a face too small to read; labels that will be tiny on a phone | `text-small` `phone-text` |
 | A file much larger than usual, and what it is made of | `large` |
 | A fact you stated with `s.expect` that is not true | `expect` |
@@ -39,6 +41,9 @@ MOTION  (scene clock: 0 s is when the story starts. +x is toward the lower right
       0.52 – 1.80   send laptop1 → gate2
       3.00 – 4.10   zoom in 2.4× on gate2
 
+  Links with a flow
+      battery1 → lamp2   dots travel backwards, from lamp2 to battery1, jostling, 4.7 s end to end
+
   Parts that move by themselves
     machine › gate   keyed sequence, every 6 s
           0.00 s  at (0, 0, 0.75)
@@ -58,7 +63,7 @@ node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --sheet --focus gate2         
 node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --sheet --focus 1.5,0,1 --zoom 3    # three times closer, around a point
 ```
 
-A trail shows where each thing was in the last 0.3 seconds (`--trails 0.6` for longer), so a single still frame shows which way it is going. Times are seconds on the scene clock, the same clock as captions and `at:`.
+Chosen moments and close-ups are written to `<name>.frames.png`, beside the full `<name>.sheet.png`. A trail shows where each thing was in the last 0.3 seconds (`--trails 0.6` for longer), so a single still frame shows which way it is going. Times are seconds on the scene clock, the same clock as captions and `at:`.
 
 ## Stating facts
 
@@ -69,7 +74,7 @@ s.expect(1.5, (at) => at('moon').y < 0, 'anticlockwise seen from above: a quarte
 s.expect(2.7, (at) => at('gate').z - at('parcel').z > 0.9, 'the gate is clear of the parcel when it passes');
 ```
 
-`at(name)` gives `{ x, y, z, opacity, angle }` at that moment for an object (its id, or the handle `s.add` returned) or a shape with `name: '…'`. A range `[from, to]` is checked at every moment in it. The build uses the same easing and timing the browser will; a fact that is false appears under FIX THESE with the values found:
+`at(name)` gives `{ x, y, z, opacity, angle, level }` at that moment for an object (its id, or the handle `s.add` returned) or a shape with `name: '…'`. A range `[from, to]` is checked at every moment in it. The build uses the same easing and timing the browser will; a fact that is false appears under FIX THESE with the values found:
 
 ```
 ✗ [expect] Not true at 1 s: the parcel has passed the gate by 1 s. Found: parcel at (-0.65, 0, 0.45).
@@ -85,4 +90,6 @@ Good facts to state: which side of something a thing is on at a moment; that two
 - **A label for something that is not there yet.** `s.callout(…, { from, until })` shows it only while the thing exists.
 - **A part at rest inside another** (a head on its hub, a piston through its cylinder wall). The `passes-through` hint catches the ones that happen during the motion; check the rest pose in the first frame of the sheet.
 - **Many small things reading as one lump.** Nine nuclei in a row 0.2 cells apart are a bar. Space repeated things at least their own width apart, or stagger them in depth.
+- **A sliding object hidden behind something it should be in front of.** An object moved with `s.move` keeps the drawing order of the place it starts. Start it nearer the viewer than the things it passes in front of, or run the story the other way round. The `move-depth` item says when this has happened.
+- **One big object spanning the scene.** A loop of wire with particles on it, built as a single custom object, is in the way of every component inside it. Make the wires links with a `flow`, and put free-standing arrows and particle paths in `s.draw`.
 - **`phase` used to mean "later".** `phase` runs a part ahead; `delay` (seconds) makes it later.

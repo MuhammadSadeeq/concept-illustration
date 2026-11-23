@@ -309,6 +309,77 @@ throws('a builder must return parts', () => { const s = iso.scene({}); s.define(
   ok('a very large SVG says what it is made of', bn.bytes > 150 * 1024 && bn.notes.some((n) => n.code === 'large' && /sets of keyframes/.test(n.msg) && /swarm/.test(n.msg)), `${Math.round(bn.bytes / 1024)} KB`);
 }
 
+// findings from the third round of small-model tests
+{
+  const { scene } = iso;
+  // shapes that are not objects never get in the way
+  const c = scene({ look: 'sky', title: 'Loop', loop: 8 });
+  const a = c.add('cube', { at: [0, 0], label: 'A' }), b = c.add('cube', { at: [5, 0], label: 'B' });
+  c.link(a, b, { arrow: false, flow: { reverse: true, jitter: 0.07, speed: 0.6 } });
+  const drawn = c.draw((sh) => [sh.stream({ points: [[-1, -1, 0.1], [6, -1, 0.1], [6, 1, 0.1], [-1, 1, 0.1]], closed: true, count: 10 }), sh.arrow({ from: [0, 0, 1.5], to: [5, 0, 1.5] })]);
+  const cr = c.build();
+  ok('drawings are never obstacles', drawn.free && !cr.notes.some((n) => ['overlap', 'link-through', 'label-overlap'].includes(n.code)), cr.notes.map((n) => n.code).join(','));
+  ok('reversed, jostling flow is reported', cr.motion().flows.some((f) => /travel backwards, from cube\d+ to cube\d+, jostling/.test(f)));
+  throws('draw checks its layer', () => c.draw([], { layer: 'sky' }), /floor, air, sorted/);
+
+  // a caption in a group brings its group with it
+  const g = scene({ look: 'paper', title: 'Group' });
+  const p = g.add('cube', { at: [0, 0], label: 'P' }), q = g.add('cube', { at: [4.5, 0], label: 'Q' });
+  g.link(p, q);
+  g.story([g.say('A first caption that needs a moment to be read'), [g.say('Now it moves'), g.send(p, q)], g.wait(1)]);
+  const tl = g.build().motion().timeline;
+  const cap = tl.find((t) => /Now it moves/.test(t.text)), snd = tl.find((t) => /^send/.test(t.text));
+  ok('a grouped caption starts with its group', Math.abs(cap.t0 - snd.t0) < 0.01, `${cap.t0} vs ${snd.t0}`);
+
+  // zoom with hold is one step; a loop that is too short is reported
+  const z = scene({ look: 'paper', title: 'Hold', loop: 3 });
+  const o1 = z.add('cube', { at: [0, 0], label: 'One' });
+  z.story([z.zoom(o1, 2, { hold: 1 }), z.pulse(o1)]);
+  const zr = z.build(), ztl = zr.motion().timeline;
+  ok('zoom with hold goes in and comes back before the next step', ztl[0].t1 - ztl[0].t0 > 3.1 && ztl[1].t0 >= ztl[0].t1 && /scale\(2\)/.test(zr.svg));
+  ok('a story longer than the loop asked for is reported', zr.notes.some((n) => n.code === 'loop-longer'));
+
+  // keys and readouts by the clock
+  const k = scene({ look: 'paper', title: 'Seconds', loop: 10 });
+  k.custom({ at: [0, 0], id: 'rig', parts: (sh) => [
+    sh.box({ w: 2, d: 1, h: 0.4, left: (fw, fh) => [{ t: 'readout', x: fw / 2, y: fh / 2, size: 0.26, seconds: true, values: [[0, 'DAY 0'], [5, 'DAY 1']] }, { t: 'bar', x: 0.1, y: 0.05, w: 0.1, h: 0.3, fill: 'accent', seconds: true, levels: [[0, 0.2], [5, 1], [10, 0.2]] }] }),
+    sh.box({ name: 'lift', z: 0.4, w: 0.4, d: 0.4, h: 0.3, anim: { type: 'keys', period: 10, keys: [{ t: 0, move: [0, 0, 0] }, { t: 2.5, move: [0, 0, 1] }, { t: 10, move: [0, 0, 0] }] } }),
+  ] });
+  k.expect(2.5, (at) => Math.abs(at('lift').z - 1.55) < 0.01, 'a key written t: 2.5 happens at 2.5 s');
+  const kr = k.build();
+  ok('keys, bars and readouts can be timed in seconds', !kr.notes.some((n) => n.code === 'expect') && /50%\{opacity:1\}/.test(kr.svg) && /25%\{transform:translate/.test(kr.svg), kr.notes.map((n) => n.msg).join('|'));
+
+  // level-aware overlap, and level in at()
+  const w = scene({ look: 'ocean', title: 'Water', loop: 8 });
+  const water = w.add('cube', { at: [0, 0], w: 2.4, d: 2.4, h: 2, level: 0.3, id: 'water' });
+  const boat = w.custom({ at: [0, 0], z: 0.62, id: 'boat', parts: (sh) => [sh.box({ w: 0.8, d: 0.4, h: 0.3, color: 'accent' })] });
+  w.story([[w.grow(water, 0.8), w.lift(boat, 1)], w.wait(1)]);
+  w.expect(0.1, (at) => Math.abs(at(water).level - 0.3) < 0.02, 'the water starts low');
+  w.expect(4, (at) => Math.abs(at(water).level - 0.8) < 0.02, 'and has risen');
+  const wr = w.build();
+  ok('something resting on a sunk object does not overlap it', !wr.notes.some((n) => n.code === 'overlap' || n.code === 'expect'), wr.notes.map((n) => n.code + ':' + n.msg.slice(0, 60)).join('|'));
+
+  // an object that slides in front of another but is drawn behind it
+  const m = scene({ look: 'paper', title: 'Depth' });
+  const wall = m.add('cube', { at: [2, 0], w: 0.4, d: 2.4, h: 1.6, id: 'wall' });
+  const car = m.add('cube', { at: [0, 0], size: 0.7, id: 'car' });
+  m.story([m.move(car, [4, 0]), m.wait(1)]);
+  ok('a slide that ends on the wrong side of the drawing order is reported', m.build().notes.some((n) => n.code === 'move-depth' && /"car" moves in front of "wall"/.test(n.msg)));
+  const m2 = scene({ look: 'paper', title: 'Depth ok' });
+  m2.add('cube', { at: [2, 0], w: 0.4, d: 2.4, h: 1.6, id: 'wall' });
+  const car2 = m2.add('cube', { at: [4, 0], size: 0.7, id: 'car' });
+  m2.story([m2.move(car2, [6, 0]), m2.wait(1)]);
+  ok('and one that stays on its side is not', !m2.build().notes.some((n) => n.code === 'move-depth'));
+
+  // labels keep clear of objects that appear later
+  const h = scene({ look: 'paper', title: 'Later' });
+  const base = h.add('cube', { at: [0, 0], label: 'Door' });
+  const later = h.add('cube', { at: [0, 1.5], size: 0.8, hidden: true });
+  h.story([h.pop(later), h.wait(1)]);
+  const hs = h.build().svg;
+  ok('hidden objects still build', /Door/.test(hs));
+}
+
 // in a real browser, when one is available: the interactive page, and the checker against what is drawn
 {
   const { withPage } = await import('../skills/concept-illustration/scripts/render.mjs');

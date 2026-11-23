@@ -102,7 +102,8 @@ export default ({ scene }) => {
 
 - `size` gives every picture the same shape, so pages built from them line up. Choose it once for the slot they sit in.
 - Hold the look and the cast constant; vary composition and story. A scene may still override one option (`scene({ series, floor: 'plate' })`) when it needs to.
-- Importing your own files is fine. Only the engine is not imported: the build passes it in.
+- Importing your own files is fine; the path is relative to the scene script. Only the engine is not imported: the build passes it in.
+- Set `loop` in the series too if the pictures should run in step, and make it long enough for the longest story (the report says when a story overruns it).
 
 ## Controlling playback
 

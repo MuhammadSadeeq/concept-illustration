@@ -63,6 +63,10 @@ Put a mechanism into a labelled scene and you get a model that teaches. Here the
   <img src="gallery/ac-generator.svg" alt="A hand-turned generator: a coil of wire spins between a north and a south magnet, slip rings carry the alternating current through a loop of wire to a glowing lamp and a meter whose needle swings both ways" width="760">
 </p>
 
+<p align="center">
+  <img src="gallery/electric-circuit.svg" alt="A battery, a closed switch, a glowing lamp and an ammeter joined in one loop of wire; blue electrons drift and jostle from the negative terminal round to the positive one while gold arrows show conventional current going the other way" width="560">
+</p>
+
 The same goes for anything made of many small things in motion. Below, each particle of air only rocks to and fro, a little later than its neighbour, and the squeeze travels although no particle does. One line of scene script draws a whole row of them.
 
 <p align="center">

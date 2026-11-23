@@ -367,7 +367,7 @@ export function renderFlat(ctx, items) {
       case 'bar': {
         // a bar that fills to a level: fixed (level) or changing over the period (levels: [[at, value, ease], ...])
         const w = it.w ?? 0.2, h = it.h ?? 1, side = it.from === 'left';
-        const lv = it.levels ? it.levels.map(([at, v, ease]) => ({ at, [side ? 'scaleX' : 'scaleY']: Math.max(0.001, v), [side ? 'scaleY' : 'scaleX']: 1, ease: ease || 'inOut' })) : null;
+        const lv = it.levels ? it.levels.map(([at, v, ease]) => ({ [it.seconds ? 't' : 'at']: at, [side ? 'scaleX' : 'scaleY']: Math.max(0.001, v), [side ? 'scaleY' : 'scaleX']: 1, ease: ease || 'inOut' })) : null;
         const still = `scale(${side ? r2(it.level ?? 1) : 1} ${side ? 1 : r2(it.level ?? 1)})`;
         if (it.track !== false) out += `<rect x="${r2(it.x)}" y="${r2(it.y)}" width="${r2(w)}" height="${r2(h)}"${it.r ? ` rx="${r2(it.r)}"` : ''} fill="${col(it.track || it.fill || '#000', ctx)}" fill-opacity="${it.track ? 1 : 0.16}"/>`;
         const style = lv && ctx ? ctx.animStyle({ type: 'keys', period: it.period, phase: it.phase, delay: it.delay, keys: lv }, true) : '';
@@ -380,8 +380,9 @@ export function renderFlat(ctx, items) {
         const size = it.size || 0.3;
         if (ctx && ctx.sawText && vals.length) ctx.sawText(size, vals[0][1]);
         vals.forEach(([at, text], i) => {
-          const until = i < vals.length - 1 ? vals[i + 1][0] : 1 + (vals[0][0] || 0);
-          const style = ctx && vals.length > 1 ? ctx.animStyle({ type: 'show', period: it.period, phase: it.phase, delay: it.delay, from: at, to: until }, true) : '';
+          // the last value stays until the first comes round again
+          const until = i < vals.length - 1 ? vals[i + 1][0] : vals[0][0] > 0 ? 'wrap-first' : null;
+          const style = ctx && vals.length > 1 ? ctx.animStyle({ type: 'show', period: it.period, phase: it.phase, delay: it.delay, seconds: !!it.seconds, from: at, to: until, first: vals[0][0] }, true) : '';
           out += `<text x="${r2(it.x)}" y="${r2(it.y)}" font-size="${r2(size)}" font-family="${esc(it.mono === false ? ctx.theme.font : ctx.theme.mono)}" font-weight="${it.weight || 700}" text-anchor="${it.anchor || 'middle'}" dominant-baseline="central" fill="${col(it.fill || '#000', ctx)}"${style ? ` style="${style}"` : ''}>${esc(String(text))}</text>`;
         });
         break;

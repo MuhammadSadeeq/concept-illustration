@@ -12,7 +12,7 @@
 //   node build.mjs --list                       -> every object kind, icon, theme and token
 //
 // A scene script is an ES module whose default export receives the API and returns a scene:
-//   export default ({ scene }) => { const s = scene({ theme: 'aurora' }); ...; return s; };
+//   export default ({ scene }) => { const s = scene({ look: 'aurora' }); ...; return s; };
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -152,7 +152,9 @@ async function main() {
       // --frames 12 asks for that many frames; --frames 2.3,2.6 (or --at 2.3,2.6) asks for those moments
       const fr = val('frames', '8'), at = val('at');
       const times = /,/.test(fr) ? nums(fr) : at && /,/.test(at) ? nums(at) : null;
-      if (flag('sheet')) made.push(await R.renderSheet(view, path.join(outDir, `${name}.sheet.png`), { frames: times ? times.length : +fr || 8, times, trails: flag('trails') ? +val('trails') || 0.3 : 0 }));
+      // the whole-loop sheet keeps its name; chosen moments and close-ups go to their own file beside it
+      const sheetName = times || focus || zoomArg ? `${name}.frames.png` : `${name}.sheet.png`;
+      if (flag('sheet')) made.push(await R.renderSheet(view, path.join(outDir, sheetName), { frames: times ? times.length : +fr || 8, times, trails: flag('trails') ? +val('trails') || 0.3 : 0 }));
       if (flag('png')) made.push(await R.renderPng(view, path.join(outDir, `${name}.png`), { at: at != null && !/,/.test(at) ? +at : null, scale: +val('scale', 2) }));
       for (const f of ['mp4', 'gif', 'webm']) if (flag(f)) made.push(await R.renderVideo(r.svg, path.join(outDir, `${name}.${f}`), { format: f, fps: +val('fps', 30), width: +val('width', 1280), loops: +val('loops', 1), intro: flag('intro') }));
     } catch (e) {
@@ -174,7 +176,8 @@ async function main() {
     console.log('\nMOTION  (scene clock: 0 s is when the story starts. +x is toward the lower right of the picture, +y toward the lower left, +z up)');
     if (m.timeline.length) { console.log('\n  Story'); for (const st of [...m.timeline].sort((p, q) => p.t0 - q.t0)) console.log(`    ${st.t0.toFixed(2).padStart(6)} – ${st.t1.toFixed(2).padEnd(6)} ${st.text}`); }
     if (m.parts.length) { console.log('\n  Parts that move by themselves'); for (const line of m.parts) console.log(`  ${line}`); }
-    if (!m.timeline.length && !m.parts.length) console.log('  Nothing moves.');
+    if (m.flows.length) { console.log('\n  Links with a flow'); for (const line of m.flows) console.log(`    ${line}`); }
+    if (!m.timeline.length && !m.parts.length && !m.flows.length) console.log('  Nothing moves.');
   }
   if (!wantsRaster) console.log('\nNext: look at the result. Add --sheet to get frames across the loop as one PNG.');
   if (flag('strict') && warns.length) process.exit(2);

@@ -113,7 +113,7 @@ More in [design](references/design.md).
 
 ### 4. Cast the objects
 
-How many depends on the job: **5 to 9** for a hero scene or explainer, **2 to 4** for a small component, **1** for a vignette. Choose the most literal object for each noun. One is the **hero**: `hero: true`, and `scale: 1.2` to `1.4` if it needs presence.
+How many depends on the job: **4 to 9** for a hero scene or explainer, **2 to 4** for a small component, **1** for a vignette. Choose the most literal object for each noun. One is the **hero**: `hero: true`, and `scale: 1.2` to `1.4` if it needs presence.
 
 | Group | Kinds |
 | --- | --- |
@@ -170,12 +170,22 @@ s.link(a, b)                                  // solid line, arrowhead at b, a s
 s.link(a, b, { style: 'dashed' })             // 'line' | 'dashed' | 'dotted' | 'pipe' | 'road'
 s.link(a, b, { arrow: 'both' })               // true | 'both' | false
 s.link(a, b, { flow: true })                  // dots stream along it forever ('alternate': they rock to and fro)
+s.link(a, b, { flow: { reverse: true, jitter: 0.07, speed: 0.6 } })   // from b to a, jostling, slowly
 s.link(a, b, { route: 'straight' })           // 'auto' | 'x' | 'y' | 'straight'   (or via: [[x, y], ...])
 s.link(a, b, { arc: true })                   // a hop through the air
 s.link(a, b, { label: 'HTTPS', dim: true })   // small caption; dim fades a secondary link
 ```
 
 Draw only links that carry meaning. One link serves both directions. Ends may be points `[x, y]`.
+
+**Things that are not objects** (arrows, guides, field lines, particles in the air) are drawn with `s.draw`. They take up no room: nothing avoids them and they are never reported as overlapping, so they can run round and between the objects.
+
+```js
+s.draw((sh) => [sh.arrow({ from: [0, 5, 0], to: [3, 5, 0], color: 'gold' })]);          // an arrow on the floor beside a wire
+s.draw((sh) => [sh.stream({ points: [[0, 0, 2], [6, 0, 2]], count: 12 })], { layer: 'air' });   // particles over the objects
+```
+
+For something flowing round a loop of components (current in a circuit, water in pipes), make the wires links and put the flow on them; do not build one big object that spans the loop. `examples/electric-circuit.scene.mjs` shows the pattern.
 
 ### 7. Choreograph one story
 
@@ -184,15 +194,15 @@ Draw only links that carry meaning. One link serves both directions. Ends may be
 | Step | Meaning |
 | --- | --- |
 | `s.send(a, b, { as, color, label, count, scale })` | A token travels a to b along their link, leaving a short trail. `as`: `dot` `doc` `cube` `box` `coin` `mail` `gem`, or any kind, including your own, such as `'truck'` |
-| `s.move(obj, [x, y])` | The object itself slides across the floor and stays |
+| `s.move(obj, [x, y])` | The object itself slides across the floor and stays. It keeps the drawing order of the place it starts, so start it nearer the viewer than anything it will pass in front of (the report says when this goes wrong) |
 | `s.pulse(obj)` · `s.glow(obj)` · `s.shake(obj)` | It acted · it is lit · it refused |
 | `s.tint(obj, 'ok')` | New state by colour: `ok` `warn` `danger` `accent` `accent2` |
 | `s.mark(obj, 'check')` | A badge pops above it with a small burst: any icon |
 | `s.pop(obj)` · `s.show(obj)` · `s.hide(obj)` | Reveal or remove (create with `hidden: true`) |
-| `s.grow(obj)` | Rise out of the floor. Create it with `level: 0`, which leaves it sunk out of sight. Suits flat-topped things (`bars`, `building`, `cylinder`, `cube`, `stack`); for anything else use `hidden: true` and `s.pop` |
+| `s.grow(obj)` · `s.grow(obj, 0.6)` | Rise out of the floor, fully or to a fraction of its height (water rising, a tank filling); a smaller fraction sinks it again. Create it with `level: 0`, which leaves it sunk out of sight. Suits flat-topped things (`bars`, `building`, `cylinder`, `cube`, `stack`); for anything else use `hidden: true` and `s.pop` |
 | `s.lift(obj, 0.5)` · `s.drop(obj)` | Raise and lower |
 | `s.say('…')` | Caption under the scene; stays until the next `say`. `s.say('…', { at: 6 })` pins it to second 6 |
-| `s.zoom(obj, 2.5)` · `s.zoom()` | The camera moves in on an object or a point `[x, y, z]`, then back out to the whole scene |
+| `s.zoom(obj, 2.5, { hold: 1.5 })` | The camera moves in on an object or a point `[x, y, z]`, stays, and comes back out. Without `hold` it stays in until `s.zoom()` |
 | `s.wait(1)` | Hold |
 
 - **Cause, then effect.** A token arrives; then the receiver reacts.
@@ -221,7 +231,7 @@ node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --looks                  # the
 node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --experience step        # interactive page: 'loop' | 'step' | 'scroll'
 node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --png --at 3             # one still; also --mp4 --gif --webm
 node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --motion                 # print what moves, when and which way
-node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --sheet --frames 2.3,2.6 --trails --focus <id>   # those moments, with direction shown, close up
+node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --sheet --frames 2.3,2.6 --trails --focus <id>   # those moments, with direction shown, close up (writes <name>.frames.png)
 ```
 
 - An error names the line of your script and suggests the fix.
@@ -265,7 +275,7 @@ Before you hand it over, every line must be true:
 - The still frame alone tells the idea; motion confirms it.
 - The look was chosen for this subject and is not the one you used last time.
 - One object is clearly the most important, and the eye lands on it first.
-- Every object is needed (5 to 9 in a scene, 2 to 4 in a component, 1 in a vignette), and each is the right object, not the nearest available one.
+- Every object is needed (4 to 9 in a scene, 2 to 4 in a component, 1 in a vignette), and each is the right object, not the nearest available one.
 - The scene has depth: something behind, something in front, heights that differ.
 - Every label is 1 to 3 words. No two labels touch. No label sits on an object.
 - Links run straight or turn once. None passes under an object.

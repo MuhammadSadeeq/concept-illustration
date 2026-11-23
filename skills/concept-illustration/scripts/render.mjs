@@ -186,6 +186,7 @@ export async function renderSheet(svg, out, { frames = 8, cols, cell, times: ask
   times = [...new Set(times.map((t) => +t.toFixed(2)))].sort((a, b) => a - b);
   frames = times.length;
   if (exact && frames <= 4) { cols = cols || Math.min(2, frames); cell = cell || (frames <= 2 ? 760 : 620); } // a few chosen frames are shown large
+  if (m.w > 900 && !cols) { cols = frames <= 2 ? 1 : 2; cell = cell || (cols === 1 ? 1100 : 760); } // a wide scene needs wide tiles to stay readable
   cols = cols || (frames <= 4 ? 2 : frames <= 9 ? 3 : 4);
   cell = cell || (cols <= 2 ? 620 : cols === 3 ? 460 : 380);
   const rows = Math.ceil(frames / cols);
