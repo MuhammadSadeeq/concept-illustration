@@ -31,8 +31,8 @@ function unknown(what, value, list) {
 }
 
 const COMMON_OPTS = ['at', 'on', 'z', 'scale', 'color', 'accent', 'label', 'sub', 'labelSide', 'hero', 'hidden', 'float', 'glow', 'id', 'shadow', 'badge', 'level', 'info', 'opacity', 'ghost'];
-const STEP_OPTS = ['dur', 'delay', 'color', 'keep', 'as', 'count', 'stagger', 'speed', 'label', 'route', 'via', 'arc', 'ease', 'react', 'stay', 'id', 'scale'];
-const SCENE_OPTS = ['look', 'theme', 'palette', 'finish', 'floor', 'accent', 'accent2', 'bg', 'background', 'grid', 'title', 'desc', 'heading', 'subheading', 'loop', 'intro', 'pad', 'aspect', 'id', 'font', 'shadows', 'haze', 'vignette', 'detail'];
+const STEP_OPTS = ['at', 'hold', 'dur', 'delay', 'color', 'keep', 'as', 'count', 'stagger', 'speed', 'label', 'route', 'via', 'arc', 'ease', 'react', 'stay', 'id', 'scale'];
+const SCENE_OPTS = ['series', 'look', 'theme', 'palette', 'finish', 'floor', 'accent', 'accent2', 'bg', 'background', 'grid', 'title', 'desc', 'heading', 'subheading', 'loop', 'intro', 'pad', 'aspect', 'size', 'id', 'font', 'shadows', 'haze', 'vignette', 'detail'];
 const LINK_OPTS = ['style', 'color', 'arrow', 'flow', 'route', 'via', 'label', 'arc', 'width', 'z', 'gap', 'dim'];
 
 function scaleParts(parts, k) {
@@ -48,6 +48,7 @@ function scaleParts(parts, k) {
     if (q.t === 'cone') { q.r0 *= k; q.r1 = (q.r1 || 0) * k; q.h *= k; }
     if (q.t === 'line') q.pts = q.pts.map((v) => v.map((c) => c * k));
     if (q.t === 'raw') q.scale = (q.scale || 1) * k;
+    if (q.t === 'stream') { q.pts = q.pts.map((v) => v.map((c) => c * k)); for (const key of ['r', 'jitter', 'wavelength']) if (typeof q[key] === 'number') q[key] *= k; q.swing = Array.isArray(q.swing) ? q.swing.map((c) => c * k) : typeof q.swing === 'number' ? q.swing * k : q.swing; }
     if (q.t === 'decal') { q.items = [{ t: 'g', scale: k, items: q.items }]; if (q.size) q.size = q.size.map((v) => v * k); }
     if (q.decals) q.decals = q.decals.map((d) => ({ ...d, o: d.o.map((v) => v * k), items: [{ t: 'g', scale: k, items: d.items }] }));
     if (q.parts) q.parts = q.parts.map(S);
@@ -74,6 +75,10 @@ function footprints(parts, out = []) {
 
 export class Scene {
   constructor(opts = {}) {
+    // series: settings and custom kinds shared by a set of related scenes; this scene's own options win
+    const series = opts.series && typeof opts.series === 'object' ? opts.series : null;
+    if (opts.series && !series) throw new Error('series must be an object of shared scene options, e.g. { look: "paper", size: [640, 480], kinds: { magnet: (o, sh, K) => ({ parts: [...] }) } }.');
+    if (series) { const { kinds: _k, ...shared } = series; const { series: _s, ...own } = opts; opts = { ...shared, ...own }; }
     for (const k of Object.keys(opts)) if (!SCENE_OPTS.includes(k)) this._early = [...(this._early || []), { level: 'warn', code: 'option', msg: `scene(): unknown option "${k}" was ignored.${suggest(k, SCENE_OPTS) ? ` Did you mean "${suggest(k, SCENE_OPTS)}"?` : ''}` }];
     this.opts = { background: true, intro: true, pad: 56, shadows: true, ...opts };
     this.notes = this._early || [];
@@ -98,6 +103,8 @@ export class Scene {
     this.zones = [];
     this.texts = [];
     this.callouts = [];
+    this.expects = [];
+    this._seriesKinds = series && series.kinds ? series.kinds : null;
     this.kinds = {};
     this.steps = null;
     this.storyOpts = {};
@@ -108,6 +115,7 @@ export class Scene {
       mat: (c) => material(theme, c || 'body'),
       hex: (c) => theme.roles[c] || (isHex(c) ? c : theme.roles.accent),
     };
+    if (this._seriesKinds) for (const [name, builder] of Object.entries(this._seriesKinds)) this.define(name, builder);
   }
 
   note(level, code, msg) { this.notes.push({ level, code, msg }); }
@@ -185,7 +193,7 @@ export class Scene {
       float: o.float ? (typeof o.float === 'object' ? o.float : {}) : null,
       label: o.label ?? null, sub: o.sub ?? null, labelSide: o.labelSide || null,
       tracks: {}, tints: [], marks: [],
-      animated: JSON.stringify(parts, (key, v) => (typeof v === 'function' ? undefined : v)).includes('"anim":{'),
+      animated: /"anim":\{|"t":"stream"/.test(JSON.stringify(parts, (key, v) => (typeof v === 'function' ? undefined : v))),
     };
     Object.defineProperty(obj, 'box', { get() { return aabbShift(this.local, [this.x, this.y, this.z]); } });
     obj.top = [x, y, z + obj.h];
@@ -212,6 +220,41 @@ export class Scene {
     const name = `custom${Object.keys(this.kinds).length + 1}`;
     this.kinds[name] = { custom: true, opts: '', desc: 'custom', build: (oo, K) => ({ parts: typeof parts === 'function' ? parts(SHAPES, K, oo) : parts, w, d, h, round }) };
     return this.add(name, rest);
+  }
+
+  /**
+   * Where a named shape of an object is, in scene cells: [x, y, z] at the top of the shape (or its 'centre').
+   * Use it to aim a callout or end a link at a part: s.callout(s.point(battery, 'neg'), 'Negative terminal').
+   */
+  point(obj, name, where = 'top') {
+    const ob = this._obj(obj, 'point(obj, name)');
+    const find = (parts) => { for (const p of parts) { if (!p) continue; if (p.name === name) return p; if (p.t === 'group') { const hit = find(p.parts); if (hit) return hit; } } return null; };
+    const part = find(ob.parts);
+    if (!part) {
+      const names = []; const walk = (parts) => parts.forEach((p) => { if (p && p.name) names.push(p.name); if (p && p.t === 'group') walk(p.parts); }); walk(ob.parts);
+      throw new Error(`point(obj, "${name}"): ${ob.id} has no shape with that name. ${names.length ? `Its named shapes: ${names.join(', ')}.` : 'Give a shape name: "…" in the builder to refer to it.'}`);
+    }
+    const b = primBox(part);
+    return [+(ob.x + (b.x0 + b.x1) / 2).toFixed(3), +(ob.y + (b.y0 + b.y1) / 2).toFixed(3), +(ob.z + (where === 'centre' || where === 'center' ? (b.z0 + b.z1) / 2 : b.z1)).toFixed(3)];
+  }
+
+  /**
+   * Shapes that are not objects: particle paths, arrows, field lines, guides, ripples.
+   * They take up no room. Nothing avoids them, they throw no shadow, and they are never reported as
+   * overlapping anything, so they can run round and between the objects. Coordinates are scene cells.
+   *   s.draw((sh, K) => [sh.stream({ points: [[0, 0, 0.1], [6, 0, 0.1]] }), sh.arrow({ from: [0, 2, 0], to: [6, 2, 0] })]);
+   * layer: 'floor' (default, under the objects) | 'air' (over them) | 'sorted' (in among them by depth).
+   */
+  draw(parts, o = {}) {
+    if (parts && !Array.isArray(parts) && typeof parts !== 'function' && parts.t == null) { o = parts; parts = o.parts; }
+    if (parts && !Array.isArray(parts) && typeof parts !== 'function') parts = [parts];
+    if (!parts) throw new Error('draw(parts): pass shapes, or a function (sh, K) => [ ...shapes ], e.g. s.draw((sh) => [sh.arrow({ from: [0, 2, 0], to: [4, 2, 0] })]).');
+    const layer = o.layer || 'floor';
+    if (!['floor', 'air', 'sorted'].includes(layer)) throw unknown('layer', layer, ['floor', 'air', 'sorted']);
+    const { layer: _l, parts: _p, ...rest } = o;
+    const obj = this.custom({ at: [0, 0], ...rest, parts, shadow: false });
+    obj.free = true; obj.layer = layer;
+    return obj;
   }
 
   /** Stand any SVG markup upright at a point: a logo, a hand-drawn figure, anything. w and h are its size in cells. */
@@ -297,7 +340,7 @@ export class Scene {
   /** A short label with a leader line, attached to any point in space [x, y, z]. */
   callout(at, text, o = {}) {
     if (!Array.isArray(at) || at.length < 2) throw new Error('callout(at, text): "at" must be a point [x, y] or [x, y, z].');
-    this.callouts.push({ at: [at[0], at[1], at[2] || 0], text: String(text), sub: o.sub || null, side: o.side || 'right', rise: +o.rise || 0, length: o.length != null ? +o.length : 30 });
+    this.callouts.push({ at: [at[0], at[1], at[2] || 0], text: String(text), sub: o.sub || null, side: o.side || 'right', rise: +o.rise || 0, length: o.length != null ? +o.length : 30, from: o.from != null ? +o.from : null, until: o.until != null ? +o.until : null });
   }
 
   // ------------------------------------------------------------ ambient motion
@@ -367,8 +410,35 @@ export class Scene {
     return { type: 'mark', obj: this._obj(obj, 'mark(obj, icon)'), icon, ...o };
   }
   /** Change the caption under the scene. Keep captions short. */
-  say(text) { return { type: 'say', text: String(text) }; }
-  wait(sec = 0.5) { return { type: 'wait', dur: sec }; }
+  /**
+   * Move the camera in on an object or a point [x, y, z], k times closer; zoom() with nothing goes back to the whole scene.
+   * The view also returns by itself before the loop restarts.
+   */
+  zoom(target = null, k = 2, o = {}) {
+    if (target && typeof target === 'object' && !Array.isArray(target) && !target._iso) { o = target; target = null; }
+    if (typeof k === 'object' && k) { o = k; k = 2; }
+    const whole = target == null;
+    if (!whole && !Array.isArray(target)) target = this._obj(target, 'zoom(target, k)');
+    if (!whole && !(k > 0)) throw new Error('zoom(target, k): k is how many times closer, e.g. s.zoom(nucleus, 3).');
+    // hold: stay in close for this many seconds, then come back out by itself, all in one step
+    return { type: 'zoom', to: whole ? null : target, k: whole ? 1 : k, ...o };
+  }
+  /** A caption. say('…', { at: 6 }) pins it to an absolute time on the scene clock. */
+  say(text, o = {}) { return { type: 'say', text: String(text), ...(typeof o === 'number' ? { at: o } : o) }; }
+  wait(sec = 0.5, o = {}) { return { type: 'wait', dur: sec, ...o }; }
+
+  /**
+   * State a fact about the motion; the build checks it and reports it under FIX THESE if it is false.
+   *   s.expect(3, (at) => at('electron').x < 0, 'the electron is left of the nucleus at 3 s');
+   *   s.expect([0, 12], (at) => at(arm, 'head').z > 0.5, 'the head never touches the platter');   // every moment in a range
+   * at(objectOrName, partName?) gives { x, y, z, opacity, angle } on the scene clock. Name a shape with name: '…'.
+   */
+  expect(t, test, msg = '') {
+    const okTime = typeof t === 'number' || (Array.isArray(t) && t.length === 2 && t.every((v) => typeof v === 'number'));
+    if (!okTime || typeof test !== 'function') throw new Error("expect(t, test, message): t is a time in seconds or a range [from, to]; test is a function (at) => true or false, e.g. s.expect(3, (at) => at('ball').x > 2, 'the ball has passed the gate').");
+    this.expects.push({ t, test, msg: String(msg || '') });
+    return this;
+  }
 
   // ------------------------------------------------------------ output
 
@@ -376,8 +446,8 @@ export class Scene {
   build() { return compile(this); }
 }
 
-const METHODS = ['add', 'link', 'zone', 'text', 'callout', 'row', 'grid', 'ring', 'define', 'custom', 'svg', 'float', 'story', 'send', 'move', 'pulse', 'glow', 'pop', 'show', 'hide', 'lift', 'drop', 'grow', 'tint', 'shake', 'mark', 'say', 'wait', 'build', 'toSVG'];
-const METHOD_ALIAS = { connect: 'link', arrow: 'link', edge: 'link', line: 'link', object: 'add', place: 'add', put: 'add', node: 'add', group: 'zone', region: 'zone', area: 'zone', annotate: 'callout', caption: 'say', narrate: 'say', emit: 'send', flow: 'send', highlight: 'glow', reveal: 'pop', appear: 'pop', rise: 'grow', raise: 'grow', pause: 'wait', delay: 'wait', sleep: 'wait', timeline: 'story', sequence: 'story', hover: 'float', render: 'build', compile: 'build' };
+const METHODS = ['add', 'draw', 'point', 'link', 'zone', 'text', 'callout', 'expect', 'zoom', 'row', 'grid', 'ring', 'define', 'custom', 'svg', 'float', 'story', 'send', 'move', 'pulse', 'glow', 'pop', 'show', 'hide', 'lift', 'drop', 'grow', 'tint', 'shake', 'mark', 'say', 'wait', 'build', 'toSVG'];
+const METHOD_ALIAS = { overlay: 'draw', shapes: 'draw', layer: 'draw', camera: 'zoom', focus: 'zoom', assert: 'expect', check: 'expect', verify: 'expect', connect: 'link', arrow: 'link', edge: 'link', line: 'link', object: 'add', place: 'add', put: 'add', node: 'add', group: 'zone', region: 'zone', area: 'zone', annotate: 'callout', caption: 'say', narrate: 'say', emit: 'send', flow: 'send', highlight: 'glow', reveal: 'pop', appear: 'pop', rise: 'grow', raise: 'grow', pause: 'wait', delay: 'wait', sleep: 'wait', timeline: 'story', sequence: 'story', hover: 'float', render: 'build', compile: 'build' };
 
 /** Create a scene. Calling a method that does not exist explains what to use instead. */
 export const scene = (opts) => new Proxy(new Scene(opts), {

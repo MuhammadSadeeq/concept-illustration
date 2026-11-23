@@ -14,6 +14,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
+import { proj } from './lib/geom.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,6 +34,29 @@ window.__seek = (t, withIntro) => {
   }
 };`;
 
+/**
+ * Crop a built SVG for a closer look. focus: an object id (data-obj), or a world point [x, y, z];
+ * zoom: how much closer than the whole picture (with an object id and no zoom, the object fills the frame).
+ */
+export function cropSvg(svg, { focus = null, zoom = null } = {}) {
+  const vb = (svg.match(/viewBox="([^"]+)"/) || [, '0 0 800 600'])[1].split(/\s+/).map(Number);
+  let cx = vb[0] + vb[2] / 2, cy = vb[1] + vb[3] / 2, w = vb[2], h = vb[3];
+  if (Array.isArray(focus)) { [cx, cy] = proj(focus[0] || 0, focus[1] || 0, focus[2] || 0); }
+  else if (focus) {
+    const m = svg.match(new RegExp(`data-obj="${String(focus).replace(/[^\w-]/g, '')}"[^>]*data-box="([^"]+)"`));
+    if (!m) {
+      const ids = [...svg.matchAll(/data-obj="([^"]+)"/g)].map((x) => x[1]);
+      throw new Error(`--focus: no object with id "${focus}". Ids in this scene: ${ids.join(', ') || 'none'}. Or give a point: --focus x,y,z`);
+    }
+    const b = m[1].split(' ').map(Number);
+    cx = (b[0] + b[2]) / 2; cy = (b[1] + b[3]) / 2;
+    if (!zoom) { const side = Math.max(b[2] - b[0], b[3] - b[1]) * 1.5 + 30; w = side * (vb[2] / vb[3] > 1 ? 1.25 : 1); h = side; }
+  }
+  if (zoom) { w = vb[2] / zoom; h = vb[3] / zoom; }
+  const box = [cx - w / 2, cy - h / 2, w, h].map((v) => +v.toFixed(1));
+  return svg.replace(/viewBox="[^"]+" width="[\d.]+" height="[\d.]+"/, `viewBox="${box.join(' ')}" width="${Math.round(w)}" height="${Math.round(h)}"`);
+}
+
 // A transparent scene is reviewed on a page of the tone it was designed for, never on the sheet's own dark frame.
 const tileBg = (svg) => (String(svg).match(/data-bg="(#[0-9a-fA-F]{6})"/) || [])[1] || (/data-dark="1"/.test(String(svg)) ? '#14161b' : '#ffffff');
 
@@ -44,8 +68,19 @@ function pageHtml(svg, { bg = 'transparent', width, sheet } = {}) {
   const { frames, cols, cell } = sheet;
   const cells = sheet.times.map((t, i) => {
     // each copy needs its own ids so gradients and keyframes do not collide
-    const copy = svg.replace(/iso[0-9a-z]+(?=[-"#.)\s])/g, (id) => `${id}f${i}`).replace('<svg ', `<svg data-t="${t.toFixed(3)}" `);
-    return `<figure><div style="background:${tileBg(svg)}">${copy}</div><figcaption>${t.toFixed(1)}s</figcaption></figure>`;
+    const reid = (tag) => svg.replace(/iso[0-9a-z]+(?=[-"#.)\s])/g, (id) => `${id}${tag}`);
+    const copy = reid(`f${i}`).replace('<svg ', `<svg data-t="${t.toFixed(3)}" `);
+    // motion trails: the same frame a few moments earlier, laid faintly over this one, so a still shows
+    // which way things are going. Blending keeps everything that has not moved exactly as it was.
+    let ghosts = '';
+    if (sheet.trails) {
+      const blend = /data-dark="1"/.test(svg) ? 'lighten' : 'darken';
+      [0.5, 0.32, 0.18].forEach((op, k) => {
+        const tg = (((t - ((k + 1) * sheet.trails) / 3) % m.loop) + m.loop) % m.loop;
+        ghosts += reid(`f${i}g${k}`).replace('<svg ', `<svg data-t="${tg.toFixed(3)}" style="position:absolute;left:0;top:0;mix-blend-mode:${blend};opacity:${op}" `);
+      });
+    }
+    return `<figure><div style="position:relative;background:${tileBg(svg)}">${copy}${ghosts}</div><figcaption>${t.toFixed(sheet.exact ? 2 : 1)}s${sheet.trails ? ' · trails show where things were just before' : ''}</figcaption></figure>`;
   }).join('');
   return `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;background:#16181d;font:600 13px system-ui,sans-serif;color:#cfd3dc}main{display:grid;grid-template-columns:repeat(${cols},${cell}px);gap:8px;padding:8px}figure{margin:0;background:#22252c;border-radius:6px;overflow:hidden}figure svg{display:block;width:100%;height:auto}figcaption{padding:4px 8px}</style></head><body><main>${cells}</main><script>${SEEK}</script></body></html>`;
 }
@@ -78,7 +113,7 @@ function findChrome() {
   return null;
 }
 
-async function withPage(viewport, scale, fn) {
+export async function withPage(viewport, scale, fn) {
   const eng = await loadEngine();
   if (!eng) return null;
   const launchOpts = { args: ['--no-sandbox', '--force-prefers-reduced-motion=0'] };
@@ -123,7 +158,7 @@ export async function renderPng(svg, out, { at = null, scale = 2, width, bg = 't
 }
 
 /** One image holding several frames spread across the loop: the quickest way to check motion. */
-export async function renderSheet(svg, out, { frames = 8, cols, cell } = {}) {
+export async function renderSheet(svg, out, { frames = 8, cols, cell, times: asked = null, trails = 0 } = {}) {
   const m = meta(svg);
   // Prefer the story's own key moments (tokens mid-flight, states just changed) over an even spread,
   // so short events are not missed between samples.
@@ -145,12 +180,17 @@ export async function renderSheet(svg, out, { frames = 8, cols, cell } = {}) {
       times.push((s[gi] + s[gi + 1]) / 2);
     }
   }
+  // frames at chosen times (on the scene clock) replace the automatic choice
+  const exact = Array.isArray(asked) && asked.length > 0;
+  if (exact) times = asked.map((t) => ((t % m.loop) + m.loop) % m.loop);
   times = [...new Set(times.map((t) => +t.toFixed(2)))].sort((a, b) => a - b);
   frames = times.length;
+  if (exact && frames <= 4) { cols = cols || Math.min(2, frames); cell = cell || (frames <= 2 ? 760 : 620); } // a few chosen frames are shown large
+  if (m.w > 900 && !cols) { cols = frames <= 2 ? 1 : 2; cell = cell || (cols === 1 ? 1100 : 760); } // a wide scene needs wide tiles to stay readable
   cols = cols || (frames <= 4 ? 2 : frames <= 9 ? 3 : 4);
   cell = cell || (cols <= 2 ? 620 : cols === 3 ? 460 : 380);
   const rows = Math.ceil(frames / cols);
-  const html = pageHtml(svg, { sheet: { frames, cols, cell, times } });
+  const html = pageHtml(svg, { sheet: { frames, cols, cell, times, trails, exact } });
   const W = cols * cell + (cols + 1) * 8, H = Math.round(rows * ((cell * m.h) / m.w + 26) + (rows + 1) * 8);
   const done = await withPage({ width: W, height: H }, 1, async (page) => {
     await page.setContent(html);

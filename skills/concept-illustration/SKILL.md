@@ -2,6 +2,8 @@
 name: concept-illustration
 description: Create richly detailed isometric 3D illustrations, motion graphics and interactive scenes that make an idea visible - animated explainers, diagrams of how something works, hero visuals, step-through and scroll-driven experiences, and small animated components for pages, docs, READMEs, slides and video. Output is a self-contained animated SVG (plus optional interactive page, PNG, GIF, MP4). Use whenever the user asks to illustrate, visualize, diagram, animate or explain a concept, process, system, architecture, workflow, data flow or product feature, or asks for an isometric, 3D-style or motion graphic.
 license: MIT
+metadata:
+  version: "1.1.0"
 compatibility: Requires Node.js 18 or newer to run the bundled engine. No packages to install. PNG and video export additionally use Playwright, Puppeteer or any Chrome binary, and ffmpeg for video.
 ---
 
@@ -80,7 +82,7 @@ Every noun is a candidate object, every verb a candidate story step, and anythin
 | A quantity that grows or shrinks | Rising bars | `recipes.growth` |
 | Progress through levels | Staircase | `recipes.steps` |
 | Before and after, with and without | Two zones side by side | `s.zone` twice |
-| One mechanism that *is* the idea (a gate, a press, a valve, a sorter) | A vignette: a single object whose parts move | [Vignettes](#vignettes) |
+| One mechanism that *is* the idea (a gate, a press, a valve, a sorter) | A vignette: a single object whose parts move | [Mechanisms](#mechanisms-vignettes-and-working-models) |
 | Anything else | Your own composition | the steps below |
 
 [Recipes](references/recipes.md) give a finished scene from a short config. They are starting points: a recipe returns an ordinary scene, so add scenery, zones, custom objects and extra story steps to make it this subject's picture rather than the recipe's.
@@ -111,7 +113,7 @@ More in [design](references/design.md).
 
 ### 4. Cast the objects
 
-How many depends on the job: **5 to 9** for a hero scene or explainer, **2 to 4** for a small component, **1** for a vignette. Choose the most literal object for each noun. One is the **hero**: `hero: true`, and `scale: 1.2` to `1.4` if it needs presence.
+How many depends on the job: **4 to 9** for a hero scene or explainer, **2 to 4** for a small component, **1** for a vignette. Choose the most literal object for each noun. One is the **hero**: `hero: true`, and `scale: 1.2` to `1.4` if it needs presence.
 
 | Group | Kinds |
 | --- | --- |
@@ -153,6 +155,7 @@ The accent colour belongs to the hero. Where a supporting object shows a lot of 
 ```
 
 - `at: [x, y]` is the centre of an object, in grid cells. A row along `x` runs from the upper-left of the picture to the lower-right, the way people read. Use `y` for parallel lanes.
+- **Turning.** +x round to +y is *clockwise* seen from above, the opposite of a maths textbook. Never work out a direction of rotation from the axes: write `sense: 'cw'` or `'ccw'` (as the turn appears in the picture) and confirm it with `--motion`.
 - Centres **4 to 5 cells apart**; under 3 they collide. Linked objects share an `x` or a `y` so links run straight.
 - More than four in one row makes a long thin picture. Turn the row into an L or a U, or use two lanes, so the frame stays near 4:3 or 16:9.
 - **Three depths.** Tall or scenic things at the back (small `x + y`), the actors in the middle, low things and tokens in front. Nothing hides anything.
@@ -166,13 +169,23 @@ The accent colour belongs to the hero. Where a supporting object shows a lot of 
 s.link(a, b)                                  // solid line, arrowhead at b, a small socket at a
 s.link(a, b, { style: 'dashed' })             // 'line' | 'dashed' | 'dotted' | 'pipe' | 'road'
 s.link(a, b, { arrow: 'both' })               // true | 'both' | false
-s.link(a, b, { flow: true })                  // dots stream along it forever ('alternate': they rock to and fro)
+s.link(a, b, { flow: true })                  // dots stream from a to b forever ('alternate': they rock to and fro)
+s.link(a, b, { flow: { reverse: true, jitter: 0.07, speed: 0.6 } })   // from b to a, jostling, slowly
 s.link(a, b, { route: 'straight' })           // 'auto' | 'x' | 'y' | 'straight'   (or via: [[x, y], ...])
 s.link(a, b, { arc: true })                   // a hop through the air
 s.link(a, b, { label: 'HTTPS', dim: true })   // small caption; dim fades a secondary link
 ```
 
-Draw only links that carry meaning. One link serves both directions. Ends may be points `[x, y]`.
+Draw only links that carry meaning. One link serves both directions. Ends may be points `[x, y]`. For a wire or pipe, where the arrowhead would claim a direction, use `arrow: false`.
+
+**Things that are not objects** (arrows, guides, field lines, particles in the air) are drawn with `s.draw`. They take up no room: nothing avoids them and they are never reported as overlapping, so they can run round and between the objects.
+
+```js
+s.draw((sh) => [sh.arrow({ from: [0, 5, 0], to: [3, 5, 0], color: 'gold' })]);          // an arrow on the floor beside a wire
+s.draw((sh) => [sh.stream({ points: [[0, 0, 2], [6, 0, 2]], count: 12 })], { layer: 'air' });   // particles over the objects
+```
+
+For something flowing round a loop of components (current in a circuit, water in pipes), make the wires links and put the flow on them; do not build one big object that spans the loop. `examples/electric-circuit.scene.mjs` shows the pattern.
 
 ### 7. Choreograph one story
 
@@ -181,14 +194,15 @@ Draw only links that carry meaning. One link serves both directions. Ends may be
 | Step | Meaning |
 | --- | --- |
 | `s.send(a, b, { as, color, label, count, scale })` | A token travels a to b along their link, leaving a short trail. `as`: `dot` `doc` `cube` `box` `coin` `mail` `gem`, or any kind, including your own, such as `'truck'` |
-| `s.move(obj, [x, y])` | The object itself slides across the floor and stays |
+| `s.move(obj, [x, y])` | The object itself slides across the floor and stays. It keeps the drawing order of the place it starts, so start it nearer the viewer than anything it will pass in front of (the report says when this goes wrong) |
 | `s.pulse(obj)` · `s.glow(obj)` · `s.shake(obj)` | It acted · it is lit · it refused |
 | `s.tint(obj, 'ok')` | New state by colour: `ok` `warn` `danger` `accent` `accent2` |
 | `s.mark(obj, 'check')` | A badge pops above it with a small burst: any icon |
 | `s.pop(obj)` · `s.show(obj)` · `s.hide(obj)` | Reveal or remove (create with `hidden: true`) |
-| `s.grow(obj)` | Rise out of the floor. Create it with `level: 0`, which leaves it sunk out of sight. Suits flat-topped things (`bars`, `building`, `cylinder`, `cube`, `stack`); for anything else use `hidden: true` and `s.pop` |
+| `s.grow(obj)` · `s.grow(obj, 0.6)` | Rise out of the floor, fully or to a fraction of its height (water rising, a tank filling); a smaller fraction sinks it again. Create it with `level: 0`, which leaves it sunk out of sight. Suits flat-topped things (`bars`, `building`, `cylinder`, `cube`, `stack`); for anything else use `hidden: true` and `s.pop` |
 | `s.lift(obj, 0.5)` · `s.drop(obj)` | Raise and lower |
-| `s.say('…')` | Caption under the scene; stays until the next `say` |
+| `s.say('…')` | Caption under the scene; stays until the next `say`. `s.say('…', { at: 6 })` pins it to second 6 |
+| `s.zoom(obj, 2.5, { hold: 1.5 })` | The camera moves in on an object or a point `[x, y, z]`, stays, and comes back out. Without `hold` it stays in until `s.zoom()` |
 | `s.wait(1)` | Hold |
 
 - **Cause, then effect.** A token arrives; then the receiver reacts.
@@ -197,6 +211,7 @@ Draw only links that carry meaning. One link serves both directions. Ends may be
 - **End on the result and hold it**: `mark`, `tint`, `pop` or `grow`, then `s.wait(1)`.
 - 6 to 14 steps, 3 to 5 captions under 60 characters, a loop of 6 to 12 seconds. Changes reset themselves at the loop.
 - Steady states need no story: `flow: true` on links and `float: true` on the hero.
+- **One clock.** Second 0 is when the story starts; steps, captions, moving parts and the times on the review sheet all count from it. Any step takes `{ at: seconds }` to pin it to a moment: `s.say('The gate opens', { at: 2.7 })`.
 
 ### 8. Check the detail
 
@@ -206,7 +221,7 @@ The engine adds these by itself: a contact shadow and a cast shadow per object, 
 - Put the telling detail on the hero (a custom face, an icon, a `sub` label) and leave supporting objects plain.
 - Add `info: '…'` to the objects a viewer might want explained; it becomes a hover card in the interactive output.
 - For a small component in a card or a button-sized slot use `detail: 'clean'`, 2 to 4 objects and no captions.
-- `pad` is the margin around the content in pixels: one number, or `[sides, top-and-bottom]`. Widen it when a part swings or travels outside its object.
+- `size: [640, 480]` fixes the image's width and height, so a rebuild never shifts the page around it; `pad` sets the margin. The frame follows moving parts by itself, and the build prints the `<img>` tag to use.
 
 ### 9. Build, check, fix
 
@@ -215,12 +230,14 @@ node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --sheet                  # SVG
 node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --looks                  # the scene in six looks, to compare
 node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --experience step        # interactive page: 'loop' | 'step' | 'scroll'
 node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --png --at 3             # one still; also --mp4 --gif --webm
+node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --motion                 # print what moves, when and which way
+node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --sheet --frames 2.3,2.6 --trails --focus <id>   # those moments, with direction shown, close up (writes <name>.frames.png)
 ```
 
 - An error names the line of your script and suggests the fix.
-- Custom objects take every story step and option that built-in ones do (`hero`, `s.tint`, `s.grow`, `as:` in `s.send`).
 - **FIX THESE** are defects: resolve all. **CONSIDER** are judgement calls: act unless you have a reason.
-- The sheet shows the resting state first, then tokens in mid-flight and states just after they change (`--frames 12` for more). If you can view images, judge it against the quality bar. If you cannot, rely on the report and keep the scene simple.
+- The sheet shows the resting state first, then tokens in mid-flight and states just after they change. If you can view images, judge it against the quality bar. If you cannot, rely on the report and `--motion`, and keep the scene simple.
+- **Check directions and timing; do not assume them.** The checker verifies layout, not meaning: it cannot know that a ring should lie flat or that a particle should go left. `--motion` prints, in words, when each step happens and where every moving part goes. `--trails` shows direction on the sheet. And a scene can state facts the build then proves: `s.expect(3, (at) => at('electron').x < 0, 'left of the nucleus at 3 s')`. [Checking](references/checking.md) is the procedure.
 - Raster outputs need a browser engine (Playwright, Puppeteer or any Chrome); video also needs ffmpeg. Without them the SVG and pages are still written.
 
 ### 10. Deliver
@@ -236,46 +253,20 @@ The SVG animates in `<img>`, inline, in Markdown and in READMEs, and stops for p
 The best result is often something this file does not list. You are expected to go there.
 
 - **New objects.** `s.define` and `s.custom` build anything from shapes; `s.svg(markup, { at, w, h })` stands any drawing in the scene. Use them whenever the kit's nearest match would be a compromise. See [custom](references/custom.md).
-- **New motion.** Combine steps into behaviour the kit does not name: a queue that fills (`pop` hidden items as tokens arrive, `hide` them as they are taken), a machine that assembles (`grow` parts in turn), a handover (`move` an object between two places), a comparison (two zones running in parallel). Parts of your own objects can animate with `anim`: `blink`, `spin`, `march`, `ring` for details; `move`, `swing` and keyframed `keys` for parts that slide, lift, turn and wait.
+- **New motion.** Combine steps into behaviour the kit does not name: a queue that fills (`pop` hidden items as tokens arrive, `hide` them as they are taken), a machine that assembles (`grow` parts in turn), a handover (`move` an object between two places), a comparison (two zones running in parallel). Parts of your own objects move with `anim`: `blink`, `spin`, `march`, `ring`, `show` for details; `move`, `swing`, `orbit` and keyframed `keys` for parts that slide, lift, turn and wait.
+- **Ready-made pieces.** `sh.stream` (many particles on a path: charge in a wire, water in a pipe, air carrying sound), `sh.arrow` (a force or a direction), `sh.ripple` (rings spreading on a plane), `sh.glow` (a light), and `bar` and `readout` artwork for gauges and counters that change over time. All in [custom](references/custom.md).
 - **Experiences, not only loops.** `--experience step` lets a reader walk through the story one caption at a time; `scroll` ties the story to the page scroll; every object with `info` answers a hover or tap. Use them for teaching, onboarding and product tours. See [delivery](references/delivery.md).
-- **Mechanisms.** When how a thing works is the idea, build the thing and let its parts act it out: see [Vignettes](#vignettes).
-- **Working models.** For science and engineering (a generator, a pump, an engine, a heart), combine the two: a custom machine whose parts really turn and slide, placed in a labelled scene with links, captions and `s.callout` naming its parts. Everything that follows one cause shares one clock. Study `examples/ac-generator.scene.mjs`.
-- **Series.** For several related ideas, make several scenes with one look and one cast, so they read as chapters.
+- **Series.** For several related pictures, keep the look, the `size` and the custom objects in one shared file and pass it as `scene({ series })`, so they read as chapters of one work. See [delivery](references/delivery.md#series).
 - **Other tools.** If the idea is not spatial at all (a precise chart, a timeline of dates, a table), say so and use the right form instead of forcing it into isometric.
 
-### Vignettes
+### Mechanisms: vignettes and working models
 
-A vignette is one mechanism, drawn large, whose parts play the idea on a loop: a press that stamps each document (approval), a turntable that shares parcels between two lanes (routing), a lighthouse sweeping its beam (monitoring). There are no labels, links or captions; the mechanism is the explanation. One plain companion object is fine when the mechanism needs something to act on or deliver to. It suits hero slots, feature cards and anywhere a diagram would be too much.
+When how a thing works *is* the idea, build the thing and let its parts act it out.
 
-```js
-export default ({ scene }) => {
-  const s = scene({ look: 'studio', title: 'A gate that opens for each request', loop: 4, pad: 40 });
-  const P = 4; // one clock for every moving part
-  s.custom({ at: [0, 0], parts: (sh, K) => [
-    sh.box({ w: 3.6, d: 1.6, h: 0.3, r: 0.2, color: 'body' }),                       // the track
-    sh.box({ y: -0.64, z: 0.3, w: 0.3, d: 0.2, h: 1.9, r: 0.05, color: 'body' }),    // two posts
-    sh.box({ y: 0.64, z: 0.3, w: 0.3, d: 0.2, h: 1.9, r: 0.05, color: 'body' }),
-    sh.box({ z: 2.2, w: 0.3, d: 1.48, h: 0.16, r: 0.05, color: 'body' }),            // and a beam
-    // the request: arrives, waits at the gate, passes once it is open
-    sh.box({ x: -1.4, z: 0.3, w: 0.44, d: 0.44, h: 0.32, r: 0.08, color: 'body2', anim: { type: 'keys', period: P, keys: [
-      { at: 0, move: [0, 0, 0], opacity: 0 }, { at: 0.08, move: [0.1, 0, 0], opacity: 1, ease: 'out' },
-      { at: 0.28, move: [0.95, 0, 0] }, { at: 0.5, move: [0.95, 0, 0] },
-      { at: 0.8, move: [2.7, 0, 0], opacity: 1 }, { at: 0.88, move: [2.9, 0, 0], opacity: 0 }] } }),
-    // the gate: waits for the request, lifts, holds, closes behind it
-    sh.box({ z: 0.3, w: 0.2, d: 1.04, h: 0.9, r: 0.06, color: 'accent', anim: { type: 'keys', period: P, keys: [
-      { at: 0, move: [0, 0, 0] }, { at: 0.32, move: [0, 0, 0] },
-      { at: 0.46, move: [0, 0, 0.95] }, { at: 0.78, move: [0, 0, 0.95], ease: 'in' },
-      { at: 0.92, move: [0, 0, 0] }] } }),
-  ] });
-  return s;
-};
-```
+- A **vignette** is one mechanism drawn large, with no labels, links or captions: a press that stamps each document (approval), a turntable sharing parcels between two lanes (routing), a lighthouse sweeping its beam (watching). One plain companion object is fine. It suits hero slots and feature cards.
+- A **working model** stands such a machine in a labelled scene: `s.callout` names its parts and a few captions walk through cause and effect. A generator, a pump, a wave.
 
-- Choose a mechanism the viewer knows from the physical world, and reduce it to two to five parts.
-- One clock: give every moving part the same `period` (the scene's `loop`), and offset with `phase` or with where its keys sit. Something must visibly cause each movement.
-- Let it breathe: wait, move with weight (`ease: 'in'` to fall, `'out'` to settle, `'back'` to overshoot), hold the result, return.
-- One colour for the part that matters; everything else neutral. The `studio` look with its `line` finish was made for this; `sand`, `mint` and the dark looks work as well.
-- Study `examples/approval-press.scene.mjs`, `examples/parcel-sorter.scene.mjs` and `examples/lighthouse.scene.mjs`, and read [custom](references/custom.md#moving-parts) for every motion type.
+The rules are the same for both: a mechanism the viewer knows from the physical world, in two to five parts; every part held by something; one `period` for all of them; every movement visibly caused by another; one colour for the part that does the work. [Custom](references/custom.md#moving-parts) has a complete small example and every kind of motion. Study `examples/approval-press`, `parcel-sorter` and `lighthouse` (vignettes), `ac-generator` and `sound-wave` (working models).
 
 ## Quality bar
 
@@ -284,12 +275,13 @@ Before you hand it over, every line must be true:
 - The still frame alone tells the idea; motion confirms it.
 - The look was chosen for this subject and is not the one you used last time.
 - One object is clearly the most important, and the eye lands on it first.
-- Every object is needed (5 to 9 in a scene, 2 to 4 in a component, 1 in a vignette), and each is the right object, not the nearest available one.
+- Every object is needed (4 to 9 in a scene, 2 to 4 in a component, 1 in a vignette), and each is the right object, not the nearest available one.
 - The scene has depth: something behind, something in front, heights that differ.
 - Every label is 1 to 3 words. No two labels touch. No label sits on an object.
 - Links run straight or turn once. None passes under an object.
 - The story has a beginning, a change and a result, and the result is held before the loop restarts. In a vignette, every movement has a visible cause.
 - Colour means something: neutral for context, accent for the hero, `ok` / `warn` / `danger` for a state or for an actor that is itself good, risky or harmful.
+- Every direction and every caption's timing has been checked with `--motion`, `--trails` or `s.expect`, not assumed.
 - The build report shows nothing under FIX THESE.
 
 ## Mistakes to avoid
@@ -309,9 +301,10 @@ Before you hand it over, every line must be true:
 | File | Read it when |
 | --- | --- |
 | [references/design.md](references/design.md) | Choosing a look, composing with depth, pacing motion: the taste behind every decision |
-| [references/custom.md](references/custom.md) | The kit lacks the object, or you want your own artwork or part animation |
+| [references/custom.md](references/custom.md) | The kit lacks the object, or you want your own artwork, moving parts, particles or a mechanism |
+| [references/checking.md](references/checking.md) | Anything moves in a direction, or a caption has to arrive with the thing it describes |
 | [references/api.md](references/api.md) | You need an option not shown above |
 | [references/kit.md](references/kit.md) | Choosing built-in objects, icons, screen content, tokens |
 | [references/recipes.md](references/recipes.md) | Using or adapting a recipe |
-| [references/delivery.md](references/delivery.md) | Embedding, interactive experiences, export formats, accessibility |
+| [references/delivery.md](references/delivery.md) | Embedding, a series of pictures, interactive experiences, export formats, accessibility |
 | [examples/](examples/) | Finished scenes to study, one per pattern |

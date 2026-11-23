@@ -6,11 +6,12 @@ import {
 } from './geom.mjs';
 import { material } from './themes.mjs';
 import { KIT, PACKETS } from './kit.mjs';
-import { renderPrim, primBox, renderPrism } from './prims.mjs';
+import { renderPrim, primBox, renderPrism, sweepBox } from './prims.mjs';
 import { buildPath, pointAt, reversePath } from './links.mjs';
 import { Track, keyframes, snapPeriod, schedule, EASE, EASE_FN } from './motion.mjs';
 import { rgba, mix } from './color.mjs';
 import { ICONS } from './icons.mjs';
+import { makeProbe, findCollisions, normKeys } from './probe.mjs';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
@@ -38,7 +39,7 @@ export function compile(sc) {
   const note = (level, code, msg) => notes.push({ level, code, msg });
   const defs = new Map();
   const kfs = new Map();
-  for (const ob of sc.objs) { ob.tracks = {}; ob.tints = []; ob.marks = []; }
+  for (const ob of sc.objs) { ob.tracks = {}; ob.tints = []; ob.marks = []; ob.movedTo = null; }
 
   const def = (key, make) => {
     if (!defs.has(key)) { const id = `${uid}-d${defs.size.toString(36)}`; defs.set(key, { id, svg: make(id) }); }
@@ -52,7 +53,8 @@ export function compile(sc) {
   // ================================================================ 1. timeline
 
   const speed = sc.storyOpts.speed ?? 3.4;
-  const movers = [], rings = [], captions = [], keyTimes = [];
+  const movers = [], rings = [], captions = [], keyTimes = [], timeline = [], cameraSteps = [];
+  const flows = [], nameOf = (end) => (end && end.obj ? end.obj.id : 'a point');
   let T = o.loop ?? 6;
   const sameEnd = (a, b) => (a.obj && b.obj ? a.obj === b.obj : !a.obj && !b.obj && Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6);
   const pathFor = (st) => {
@@ -74,6 +76,7 @@ export function compile(sc) {
   if (sc.steps) {
     const durOf = (st) => {
       if (st.type === 'move') { const cur = st.obj; return clamp(Math.hypot(st.to[0] - cur.x, st.to[1] - cur.y) / (st.speed ?? speed), 0.5, 2.6); }
+      if (st.type === 'zoom' && st.hold != null && st.to) return 2.2 + Math.max(0, +st.hold); // in, stay, out
       if (st.type !== 'send') return undefined;
       st._path = pathFor(st);
       const n = st.count ?? 1;
@@ -83,6 +86,11 @@ export function compile(sc) {
     // the last caption also gets its reading time before the loop restarts
     T = Math.max(end + (sc.storyOpts.hold ?? 0.9), read.since + read.need + 0.6, o.loop ?? 0);
     T = Math.ceil(T * 10) / 10;
+    if (o.loop && T > o.loop + 0.05) note('hint', 'loop-longer', `loop: ${o.loop} was asked for, but the story needs ${r1(T)} s, so the loop is ${r1(T)} s. Anything timed against the loop (a period, a readout, a series of scenes meant to match) should use ${r1(T)}, or shorten the story.`);
+    for (const st of items) {
+      const who = (x) => (x && x.obj ? x.obj.id : x && x._iso ? x.id : Array.isArray(x) ? `[${x.join(', ')}]` : '');
+      timeline.push({ t0: st.t0, t1: st.t1, text: st.type === 'say' ? `caption "${st.text}"` : st.type === 'send' ? `send ${who(st.from)} → ${who(st.to)}${st.as ? ` as ${st.as}` : ''}` : st.type === 'wait' ? 'wait' : st.type === 'zoom' ? (st.to ? `zoom in ${st.k}× on ${st.to._iso ? st.to.id : `[${st.to.join(', ')}]`}` : 'zoom back out') : `${st.type} ${who(st.obj)}${st.type === 'move' ? ` to [${st.to.join(', ')}]` : ''}` });
+    }
     for (const st of items) {
       const ob = st.obj;
       switch (st.type) {
@@ -111,6 +119,14 @@ export function compile(sc) {
           break;
         case 'show': track(ob, 'opacity', 'opacity', ob.hidden ? 0 : 1).to(st.t0, st.t1, 1, 'smooth'); break;
         case 'hide': track(ob, 'opacity', 'opacity', ob.hidden ? 0 : 1).to(st.t0, st.t1, 0, 'smooth'); break;
+        case 'zoom': {
+          const focus = !st.to ? null : st.to._iso ? [st.to.x, st.to.y, st.to.z + st.to.h / 2] : [st.to[0], st.to[1], st.to[2] || 0];
+          const both = st.hold != null && focus; // one step that goes in, stays and comes back
+          cameraSteps.push({ t0: st.t0, t1: both ? st.t0 + 1.1 : st.t1, k: st.k, ease: st.ease || 'inOut', focus });
+          if (both) cameraSteps.push({ t0: st.t1 - 1.1, t1: st.t1, k: 1, ease: st.ease || 'inOut', focus: null });
+          keyTimes.push((both ? st.t0 + 1.1 : st.t1) + 0.15);
+          break;
+        }
         case 'lift': track(ob, 'lift', 'translate', [0, 0]).to(st.t0, st.t1, [0, -st.dz * UNIT], 'inOut'); break;
         case 'drop': track(ob, 'lift', 'translate', [0, 0]).to(st.t0, st.t1, [0, 0], 'inOut'); break;
         case 'tint': {
@@ -136,6 +152,7 @@ export function compile(sc) {
         case 'move': {
           const [ax, ay] = proj(ob.x, ob.y, ob.z), [bx, by] = proj(st.to[0], st.to[1], ob.z + (st.to[2] || 0));
           track(ob, 'move', 'translate', [0, 0]).to(st.t0, st.t1, [bx - ax, by - ay], st.ease || 'inOut');
+          (ob.movedTo || (ob.movedTo = [])).push([st.to[0] - ob.x, st.to[1] - ob.y, st.to[2] || 0]);
           break;
         }
         case 'grow': {
@@ -158,6 +175,29 @@ export function compile(sc) {
     }
   }
 
+  // ---- facts the scene states about its own motion (s.expect), checked with the browser's own arithmetic
+  const probe = makeProbe(sc, T);
+  for (const ex of sc.expects || []) {
+    const span = Array.isArray(ex.t);
+    const n = span ? Math.min(600, Math.max(2, Math.ceil((ex.t[1] - ex.t[0]) / 0.05) + 1)) : 1;
+    for (let i = 0; i < n; i++) {
+      const t = span ? ex.t[0] + ((ex.t[1] - ex.t[0]) * i) / (n - 1) : ex.t;
+      const seen = [];
+      const at = (ref, part) => {
+        const v = probe.at(ref, part, t);
+        seen.push(`${part || (ref && ref._iso ? ref.id : ref)} at ${probe.fmt(v)}${v.angle != null ? `, angle ${r1(v.angle)}°` : ''}${v.opacity < 0.99 ? `, opacity ${r2(v.opacity)}` : ''}`);
+        return v;
+      };
+      let ok = false, why = '';
+      try { ok = !!ex.test(at, t); } catch (e) { if (/^expect:/.test(e.message)) throw e; why = ` (the test threw: ${e.message})`; }
+      if (!ok) { note('warn', 'expect', `Not true at ${r2(t)} s: ${ex.msg || 'an s.expect() test'}${why}. Found: ${seen.join('; ') || 'nothing was looked up'}.`); break; }
+    }
+  }
+
+  for (const hit of findCollisions(sc, T)) {
+    note('hint', 'passes-through', `${hit.a} passes through ${hit.b} at about ${r1(hit.t)} s (they overlap by ${r2(hit.depth)} cells). If they should not touch, change the timing or the path${hit.unnamed ? '; give the shapes name: "…" to see which they are in --motion' : ''}. If one is meant to slide inside the other, list both in one sh.group({ sort: false, parts: [...] }).`);
+  }
+
   // ================================================================ 2. shared helpers
 
   const sorted = [...sc.objs].sort((a, b) => a.x + a.y - (b.x + b.y));
@@ -165,13 +205,55 @@ export function compile(sc) {
   const introEnd = o.intro ? r2(0.55 + sorted.length * stagger + 0.1) : 0;
   const introOf = new Map(sorted.map((ob, i) => [ob, i * stagger]));
 
-  const loopStyle = (css, { period = T, delay = 0, ease = 'linear' } = {}) => `animation:${kf(css)} ${r2(period)}s ${ease} ${r2(delay)}s infinite both`;
-  const storyStyle = (css) => loopStyle(css, { delay: introEnd });
+  // One clock for everything. Scene time 0 is the moment the story starts, after the intro; every
+  // repeating motion (moving parts, floats, flows) is timed against that same zero and is already
+  // running while the scene arrives. `raw` is for the story itself, which waits for the intro.
+  const loopStyle = (css, { period = T, delay = 0, ease = 'linear', raw = false, extra = '' } = {}) => {
+    let d = delay;
+    if (!raw) { d = (introEnd + delay) % period; if (d > 0) d -= period; }
+    return `animation:${kf(css)} ${r2(period)}s ${ease} ${r2(d)}s infinite${extra} both`;
+  };
+  const storyStyle = (css) => loopStyle(css, { delay: introEnd, raw: true });
+  // jostling: a few short, jerky side-steps shared between any number of particles
+  const rnd = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+  const jostle = (cells) => {
+    const jpx = cells * UNIT;
+    return {
+      css: [0, 1, 2].map((v) => `0%{transform:translate(0px,0px)}${Array.from({ length: 6 }, (_, k) => `${r2(((k + 1) / 7) * 100)}%{transform:translate(${r2((rnd(v * 10 + k) - 0.5) * 2 * jpx)}px,${r2((rnd(v * 10 + k + 50) - 0.5) * 2 * jpx)}px)}`).join('')}100%{transform:translate(0px,0px)}`),
+      P: [0.55, 0.7, 0.9].map((q) => snapPeriod(q, T)),
+      wrap: function (dot, i) { return `<g style="${loopStyle(this.css[i % 3], { period: this.P[i % 3], delay: -rnd(i + 7) * this.P[i % 3] })}">${dot}</g>`; },
+    };
+  };
+  // phase runs a part ahead (a fraction of its period already done at time 0); delay holds it back (seconds)
+  const lagOf = (a, P) => -(a.phase || 0) * P + (a.delay || 0);
+  // which way a turn goes, as it appears in the picture: 'cw' clockwise, 'ccw' anticlockwise
+  const turnOf = (a) => (a.sense === 'ccw' || a.sense === 'anticlockwise' ? -1 : a.sense === 'cw' || a.sense === 'clockwise' ? 1 : a.dir === -1 ? -1 : 1);
   const trackStyle = (tr) => storyStyle(tr.css(T));
+  // While the camera moves in, a label stays its own size and keeps to its anchor: it is scaled
+  // back about that point by exactly as much as the camera scales the scene.
+  const steady = (svg, ax, ay) => {
+    if (!cameraSteps.length || !svg) return svg;
+    const tr = new Track('camera', [0, 0, 1]);
+    for (const c of cameraSteps) { const q = c.focus ? 1 / c.k : 1; tr.to(c.t0, c.t1, [ax * (1 - q), ay * (1 - q), q], c.ease); }
+    tr.close(T);
+    return `<g style="${trackStyle(tr)}">${svg}</g>`;
+  };
+  // Object labels step aside while the camera is in close (the caption says what is being looked at);
+  // callouts, which name parts, stay.
+  const aside = (svg) => {
+    if (!cameraSteps.length || !svg) return svg;
+    const tr = new Track('opacity', 1);
+    for (const c of cameraSteps) tr.to(c.t0, c.t0 + Math.min(0.3, c.t1 - c.t0), c.focus && c.k > 1.15 ? 0 : 1, 'smooth');
+    tr.close(T);
+    return `<g style="${trackStyle(tr)}">${svg}</g>`;
+  };
   const join = (...list) => list.filter(Boolean).join(',').replace(/,animation:/g, ',');
 
+  const smallText = [];
   const ctx = {
     theme: th,
+    // text drawn on faces: remember any that will be too small to read
+    sawText(size, text) { if (size * UNIT < 8.5) smallText.push({ px: size * UNIT, text: String(text) }); },
     mat: (c) => material(th, c || 'body'),
     def,
     clipId: (k) => `${uid}-${k}`,
@@ -183,7 +265,8 @@ export function compile(sc) {
         const parts = [];
         if (k.move) { const [x, y] = shift(k.move); parts.push(`translate(${r2(x)}px,${r2(y)}px)`); }
         if (k.rotate != null) parts.push(`rotate(${r2(k.rotate)}deg)`);
-        if (k.scale != null) parts.push(`scale(${r2(k.scale)})`);
+        if (k.scaleX != null || k.scaleY != null) parts.push(`scale(${r2(k.scaleX ?? k.scale ?? 1)},${r2(k.scaleY ?? k.scale ?? 1)})`);
+        else if (k.scale != null) parts.push(`scale(${r2(k.scale)})`);
         return `${parts.length ? `transform:${parts.join(' ')}` : 'transform:none'}${k.opacity != null ? `;opacity:${r2(k.opacity)}` : ''}`;
       };
       switch (a.type) {
@@ -193,33 +276,99 @@ export function compile(sc) {
           const A = a.type === 'move' ? { move: [0, 0, 0] } : { rotate: a.from ?? -20 };
           const B = a.type === 'move' ? { move: a.by || [0, 0, 0.5] } : { rotate: a.to ?? 20 };
           const e = `;animation-timing-function:${EASE[a.ease] || EASE.inOut}`;
-          return loopStyle(`0%{${tf(A)}}${r2(h)}%{${tf(A)}${e}}50%{${tf(B)}}${r2(50 + h)}%{${tf(B)}${e}}100%{${tf(A)}}`, { period: P, delay: -(a.phase || 0) * P });
+          return loopStyle(`0%{${tf(A)}}${r2(h)}%{${tf(A)}${e}}50%{${tf(B)}}${r2(50 + h)}%{${tf(B)}${e}}100%{${tf(A)}}`, { period: P, delay: lagOf(a, P) });
         }
         case 'keys': {
           // a keyframed sequence: keys: [{ at: 0..1, move, rotate, scale, opacity, ease }]
           const P = snapPeriod(a.period || 4, T);
-          const ks = [...(a.keys || [])].sort((x, y) => x.at - y.at);
+          const ks = normKeys(a, P);
           if (!ks.length) return '';
-          if (ks[0].at > 0) ks.unshift({ ...ks[0], at: 0 });
-          if (ks[ks.length - 1].at < 1) ks.push({ ...ks[0], at: 1 });
-          return loopStyle(ks.map((k) => `${r2(clamp(k.at, 0, 1) * 100)}%{${tf(k)};animation-timing-function:${EASE[k.ease] || EASE.inOut}}`).join(''), { period: P, delay: -(a.phase || 0) * P });
+          const main = loopStyle(ks.map((k) => `${r2(clamp(k.at, 0, 1) * 100)}%{${tf(k)};animation-timing-function:${EASE[k.ease] || EASE.inOut}}`).join(''), { period: P, delay: lagOf(a, P) });
+          if (!a.fade) return main;
+          // fade: the part slips out just before its sequence restarts and back in after, hiding the jump
+          const f = r2(clamp(a.fade === true ? 0.05 : a.fade, 0.01, 0.3) * 100);
+          return join(main, loopStyle(`0%{opacity:0}${f}%{opacity:1}${r2(100 - f)}%{opacity:1}100%{opacity:0}`, { period: P, delay: lagOf(a, P) }));
         }
         case 'blink': {
           const P = snapPeriod(a.period || 2.4, T);
-          return loopStyle(`0%,100%{opacity:1}50%{opacity:${a.min ?? 0.25}}`, { period: P, delay: -(a.phase || 0) * P, ease: 'ease-in-out' });
+          return loopStyle(`0%,100%{opacity:1}50%{opacity:${a.min ?? 0.25}}`, { period: P, delay: lagOf(a, P), ease: 'ease-in-out' });
         }
-        case 'spin': return loopStyle(`to{transform:rotate(${a.dir === -1 ? -360 : 360}deg)}`, { period: snapPeriod(a.period || 8, T) });
+        case 'spin': { const P = snapPeriod(a.period || 8, T); return loopStyle(`to{transform:rotate(${turnOf(a) * 360}deg)}`, { period: P, delay: lagOf(a, P) }); }
         case 'march': {
           // alternate: the dashes rock back and forth like alternating current, still at each turn
-          if (a.alternate) { const P = snapPeriod(a.period || 2, T); return `animation:${kf(`from{stroke-dashoffset:${r2(a.len / 2)}}to{stroke-dashoffset:${r2(-a.len / 2)}}`)} ${r2(P / 2)}s ${EASE.sine} ${r2(-(a.phase || 0) * P)}s infinite alternate both`; }
+          if (a.alternate) {
+            const P = snapPeriod(a.period || 2, T);
+            let d = (introEnd + lagOf(a, P)) % P; if (d > 0) d -= P;
+            return `animation:${kf(`from{stroke-dashoffset:${r2(a.len / 2)}}to{stroke-dashoffset:${r2(-a.len / 2)}}`)} ${r2(P / 2)}s ${EASE.sine} ${r2(d)}s infinite alternate both`;
+          }
           return loopStyle(`to{stroke-dashoffset:${-a.len}}`, { period: snapPeriod(a.period || 1.2, T) });
+        }
+        case 'show': {
+          // visible only between two fractions of the period, switching at once (an interval past 1 wraps round)
+          const P = snapPeriod(a.period || T, T), div = a.seconds ? P : 1;
+          const f0 = clamp((a.from ?? 0) / div, 0, 1), f1 = a.to === 'wrap-first' ? 1 + (a.first || 0) / div : a.to == null ? 1 : a.to / div;
+          const css = f1 > 1
+            ? `0%{opacity:1}${r2((f1 - 1) * 100)}%{opacity:0}${r2(f0 * 100)}%{opacity:1}100%{opacity:1}`
+            : `0%{opacity:${f0 <= 0 ? 1 : 0}}${f0 > 0 ? `${r2(f0 * 100)}%{opacity:1}` : ''}${f1 < 1 ? `${r2(f1 * 100)}%{opacity:0}` : ''}100%{opacity:${f1 >= 1 ? 1 : 0}}`;
+          return loopStyle(css, { period: P, delay: lagOf(a, P), ease: 'step-end' });
         }
         case 'ring': {
           const P = snapPeriod(a.period || 2.4, T);
-          return loopStyle(`0%{transform:scale(.3);opacity:0}15%{opacity:.9}100%{transform:scale(1.25);opacity:0}`, { period: P, delay: -(a.phase || 0) * P, ease: 'ease-out' });
+          return loopStyle(`0%{transform:scale(.3);opacity:0}15%{opacity:.9}100%{transform:scale(1.25);opacity:0}`, { period: P, delay: lagOf(a, P), ease: 'ease-out' });
         }
         default: return '';
       }
+    },
+    /** Many particles on one path, sharing a handful of keyframes however many there are. */
+    stream(p) {
+      const pts = (p.pts || []).map((q) => [q[0], q[1], q[2] || 0]);
+      const line = p.closed ? [...pts, pts[0]] : pts;
+      const segs = []; let total = 0;
+      for (let i = 0; i < line.length - 1; i++) {
+        const a = line[i], b = line[i + 1], len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+        if (len > 1e-6) { segs.push({ a, b, len, s0: total }); total += len; }
+      }
+      if (!segs.length) return '';
+      const at3 = (dist) => {
+        const d = p.closed ? ((dist % total) + total) % total : clamp(dist, 0, total);
+        const sg = segs.find((g) => d <= g.s0 + g.len + 1e-9) || segs[segs.length - 1], f = (d - sg.s0) / sg.len;
+        return { pos: [0, 1, 2].map((i) => sg.a[i] + (sg.b[i] - sg.a[i]) * f), sg };
+      };
+      const mode = p.mode || 'drift';
+      const P = snapPeriod(p.period ?? (p.speed ? total / p.speed : 4), T);
+      const count = Math.max(1, Math.round(p.count ?? total / 0.6));
+      const hex = th.roles[p.color || 'accent'] || p.color || th.roles.accent;
+      const rpx = r1((p.r ?? 0.06) * UNIT);
+      const halo = (p.glow ?? (th.dark && th.glow > 0)) ? `<circle r="${r1(rpx * 2.8)}" fill="url(#${glowGrad(hex, 0.7)})"/>` : '';
+      const dot = `${halo}<circle r="${rpx}" fill="${hex}"${th.outline ? ` stroke="${th.ink}" stroke-width="1"` : ''}/>`;
+      const lag = lagOf(p, P);
+      let out = '';
+      if (mode === 'alternate') {
+        // every particle rocks about its own place; with a wavelength each lags the one before, so a wave travels
+        const amp = typeof p.swing === 'number' ? p.swing : 0.25;
+        for (let i = 0; i < count; i++) {
+          const dist = ((i + 0.5) / count) * total, { pos, sg } = at3(dist);
+          const u = Array.isArray(p.swing) ? p.swing : [0, 1, 2].map((k) => ((sg.b[k] - sg.a[k]) / sg.len) * amp);
+          const [dx, dy] = proj(u[0] || 0, u[1] || 0, u[2] || 0), [px, py] = projP(pos);
+          let d = (introEnd + lag + (p.wavelength ? (dist / p.wavelength) * P : 0)) % P; if (d > 0) d -= P;
+          const css = `from{transform:translate(${r2(-dx)}px,${r2(-dy)}px)}to{transform:translate(${r2(dx)}px,${r2(dy)}px)}`;
+          out += `<g transform="translate(${r1(px)} ${r1(py)})"><g style="animation:${kf(css)} ${r2(P / 2)}s ${EASE.sine} ${r2(d)}s infinite alternate both">${dot}</g></g>`;
+        }
+        return out;
+      }
+      const back = turnOf(p) === -1;
+      const verts = [{ v: line[0], d: 0 }, ...segs.map((g) => ({ v: g.b, d: g.s0 + g.len }))];
+      const stops = (back ? [...verts].reverse().map((q) => ({ v: q.v, d: total - q.d })) : verts).map((q) => [(q.d / total) * P, projP(q.v)]);
+      const css = keyframes('translate', stops, P);
+      const fade = p.closed ? '' : keyframes('opacity', [[0, 0], [P * 0.06, 1], [P * 0.94, 1], [P, 0]], P);
+      const jit = mode === 'zigzag' ? jostle(p.jitter ?? 0.1) : null;
+      for (let i = 0; i < count; i++) {
+        const delay = lag - (i / count) * P;
+        const [px, py] = projP(at3((back ? 1 - i / count : i / count) * total).pos); // where it rests when motion is off
+        const inner = jit ? jit.wrap(dot, i) : dot;
+        out += `<g transform="translate(${r1(px)} ${r1(py)})" style="${join(loopStyle(css, { period: P, delay }), fade && loopStyle(fade, { period: P, delay }))}">${inner}</g>`;
+      }
+      return out;
     },
     /**
      * Carry a shape round a circle about an axis without turning the shape itself:
@@ -234,8 +383,8 @@ export function compile(sc) {
       const f6 = (v) => +v.toFixed(6);
       const inv = [by / det, -ay / det, -bx / det, ax / det].map(f6).join(' ');
       const [cx, cy] = projP(centre);
-      const P = snapPeriod(a.period || 4, T), dir = a.dir === -1 ? -1 : 1, a0 = r2(a.from || 0);
-      const turn = (sign) => loopStyle(`to{transform:rotate(${sign * dir * 360}deg)}`, { period: P });
+      const P = snapPeriod(a.period || 4, T), dir = turnOf(a), a0 = r2(a.from || 0);
+      const turn = (sign) => loopStyle(`to{transform:rotate(${sign * dir * 360}deg)}`, { period: P, delay: lagOf(a, P) });
       return `<g transform="translate(${r2(cx)} ${r2(cy)}) matrix(${f6(ax)} ${f6(ay)} ${f6(bx)} ${f6(by)} 0 0) rotate(${a0})"><g style="${turn(1)}"><g transform="translate(${r2(a.r ?? 0.5)} 0)"><g style="${turn(-1)}"><g transform="rotate(${-a0}) matrix(${inv} 0 0) translate(${r2(-cx)} ${r2(-cy)})">${inner}</g></g></g></g></g>`;
     },
   };
@@ -328,6 +477,7 @@ export function compile(sc) {
   const hiddenAttr = (ob) => (ob.hidden ? ' opacity="0"' : '');
 
   const shadowOf = (ob) => {
+    if (ob.free) return '';
     if (ob.opts.ghost) {
       // a ghost stands for something absent or still to come: no shadow, a dashed footprint instead
       const gw = ob.res.w * ob.k + 0.3, gd = ob.res.d * ob.k + 0.3;
@@ -470,6 +620,7 @@ export function compile(sc) {
     if (flow === 'alternate' || (flow && flow.alternate)) {
       // alternating flow: every dot rocks back and forth about its own place, all in step
       const fo = typeof flow === 'object' ? flow : {};
+      flows.push(`${nameOf(lk.a)} → ${nameOf(lk.b)}   dots rock to and fro in place, once every ${r1(fo.period ?? 2)} s`);
       const P = snapPeriod(fo.period ?? 2, T);
       const count = fo.count ?? Math.max(2, Math.round(path.total / 0.8));
       const amp = (fo.swing ?? 0.3) / path.total, ph = (fo.phase || 0) * 2 * Math.PI;
@@ -483,18 +634,24 @@ export function compile(sc) {
         dots += `<g transform="translate(${r1(pos[0])} ${r1(pos[1])})" style="${loopStyle(css, { period: P })}">${glowDot}<circle r="2.6" fill="${dotColor}"${th.outline ? ` stroke="${th.ink}" stroke-width="1"` : ''}/></g>`;
       }
     } else if (flow) {
+      // reverse: the dots travel from b to a; jitter: they jostle sideways as they go (cells)
       const fo = typeof flow === 'object' ? flow : {};
-      const count = fo.count ?? Math.max(1, Math.round(path.total / 2.6));
+      flows.push(`${nameOf(lk.a)} → ${nameOf(lk.b)}   dots travel ${fo.reverse ? `backwards, from ${nameOf(lk.b)} to ${nameOf(lk.a)}` : `from ${nameOf(lk.a)} to ${nameOf(lk.b)}`}${fo.jitter ? ', jostling' : ''}, ${r1(path.total / (fo.speed ?? 2.4))} s end to end`);
+      const count = fo.count ?? Math.max(1, Math.round(path.total / (fo.jitter ? 0.7 : 2.6)));
       const P = snapPeriod(path.total / (fo.speed ?? 2.4), T);
-      const stops = flat.map((f, i) => [(path.lens[i] / path.total) * P, projP(f.p)]);
+      const frac = (f) => (fo.reverse ? 1 - f : f);
+      const stops = (fo.reverse ? [...flat].map((f, i) => ({ f, d: path.lens[i] })).reverse().map((q) => [(1 - q.d / path.total) * P, projP(q.f.p)]) : flat.map((f, i) => [(path.lens[i] / path.total) * P, projP(f.p)]));
       const css = keyframes('translate', stops, P);
       const fade = keyframes('opacity', [[0, 0], [P * 0.08, 1], [P * 0.9, 1], [P, 0]], P);
       const dotColor = fo.color ? K.hex(fo.color) : th.glow > 0 ? mix(color, '#ffffff', 0.35) : K.hex('accent');
+      const jit = fo.jitter ? jostle(fo.jitter === true ? 0.08 : fo.jitter) : null;
+      const rad = fo.r != null ? fo.r * UNIT : lo.style === 'pipe' ? 4 : fo.jitter ? 2.6 : 3.2;
       for (let i = 0; i < count; i++) {
         const delay = -((i + 0.5) / count) * P;
-        const pos = projP(pointAt(path, (i + 0.5) / count));
-        const glowDot = th.glow > 0 ? `<circle r="9" fill="url(#${glowGrad(dotColor, 0.8)})"/>` : '';
-        dots += `<g transform="translate(${r1(pos[0])} ${r1(pos[1])})" style="${join(loopStyle(css, { period: P, delay }), loopStyle(fade, { period: P, delay }))}">${glowDot}<circle r="${lo.style === 'pipe' ? 4 : 3.2}" fill="${dotColor}"${th.outline ? ` stroke="${th.ink}" stroke-width="1.2"` : ''}/></g>`;
+        const pos = projP(pointAt(path, frac((i + 0.5) / count)));
+        const glowDot = th.glow > 0 ? `<circle r="${r1(rad * 2.8)}" fill="url(#${glowGrad(dotColor, 0.8)})"/>` : '';
+        const dot = `${glowDot}<circle r="${r1(rad)}" fill="${dotColor}"${th.outline ? ` stroke="${th.ink}" stroke-width="1.2"` : ''}/>`;
+        dots += `<g transform="translate(${r1(pos[0])} ${r1(pos[1])})" style="${join(loopStyle(css, { period: P, delay }), loopStyle(fade, { period: P, delay }))}">${jit ? jit.wrap(dot, i) : dot}</g>`;
       }
     }
     if (rich && !path.arc && lk.a.obj && lo.style !== 'road' && lo.style !== 'pipe' && lo.arrow !== 'both') {
@@ -518,7 +675,7 @@ export function compile(sc) {
     // lint: a route that runs under an object
     if (!path.arc) {
       for (const ob of sc.objs) {
-        if (ob === lk.a.obj || ob === lk.b.obj || ob.parent || ob.z > 0.3) continue;
+        if (ob === lk.a.obj || ob === lk.b.obj || ob.parent || ob.free || ob.z > 0.3) continue;
         let hit = false;
         for (let i = 1; i < flat.length && !hit; i++) {
           const a = flat[i - 1].p, b = flat[i].p;
@@ -572,11 +729,14 @@ export function compile(sc) {
     const svg = `${stackedShadow.get(ob) || ''}<g transform="translate(${r1(sx)} ${r1(sy)})"${meta}>${inner}</g>`;
     let box = ob.box;
     if (ob.float) box = { ...box, z1: box.z1 + 0.2 };
-    world.push({ aabb: box, svg, ob });
+    // shapes that are not objects are drawn under the objects, over them, or in among them, as asked
+    if (ob.free && ob.layer === 'floor') floorFx += svg; else if (ob.free && ob.layer === 'air') air += svg; else world.push({ aabb: box, svg, ob });
     const sb = aabbScreen(box);
     const liftPx = ob.tracks.lift ? Math.max(0, ...ob.tracks.lift.segs.map((s) => -s.to[1])) : 0;
     grow({ x0: sb.x0, x1: sb.x1, y0: sb.y0 - liftPx - (ob.float ? 8 : 0), y1: sb.y1 });
     if (ob.tracks.move) for (const sg of ob.tracks.move.segs) grow({ x0: sb.x0 + sg.to[0], x1: sb.x1 + sg.to[0], y0: sb.y0 + sg.to[1], y1: sb.y1 + sg.to[1] });
+    // the frame must hold the object over its whole motion, not only at rest
+    if (ob.animated) for (const part of ob.parts) { const sw = sweepBox(part); if (sw) grow(growBox(aabbScreen(aabbShift(sw, [ob.x, ob.y, ob.z])), 4)); }
   }
 
   // --- story tokens: one copy per straight run of the route, so each sorts correctly among the objects
@@ -692,6 +852,7 @@ export function compile(sc) {
 
   const halo = o.background ? ` stroke="${th.text.halo}" stroke-opacity="${th.dark ? 0.7 : 0.9}" stroke-width="${th.dark ? 3.2 : 4}" stroke-linejoin="round" paint-order="stroke"` : '';
   const labelBoxes = [];
+  const calloutBoxes = [];
   const calloutSvg = (ax, ay, c) => {
     const left = c.side === 'left';
     const dir = left ? -1 : 1;
@@ -709,10 +870,24 @@ export function compile(sc) {
     grow(box);
     grow({ x0: ax - 4, x1: ax + 4, y0: ay - 4, y1: ay + 4 });
     labelBoxes.push(box);
+    calloutBoxes.push({ text: c.text, box, ax, ay, timed: c.from != null || c.until != null });
     return svg;
   };
-  for (const c of sc.callouts) { const [ax, ay] = projP(c.at); overlay += calloutSvg(ax, ay, c); }
-  const solid = sc.objs.filter((ob) => !ob.hidden).map((ob) => ({ ob, box: growBox(aabbScreen(ob.box), -5) }));
+  for (const c of sc.callouts) {
+    const [ax, ay] = projP(c.at);
+    let one = calloutSvg(ax, ay, c);
+    if (c.from != null || c.until != null) {
+      // a callout that is only on screen for part of the loop
+      const from = c.from ?? 0, until = Math.min(c.until ?? T - 0.3, T - 0.25);
+      const tr = new Track('opacity', c.from != null && c.from > 0.05 ? 0 : 1);
+      if (c.from != null && c.from > 0.05) tr.to(from, from + 0.25, 1, 'smooth');
+      tr.to(Math.max(until, from + 0.3), Math.max(until, from + 0.3) + 0.2, 0, 'smooth');
+      one = `<g style="${trackStyle(tr)}">${one}</g>`;
+    }
+    overlay += steady(one, ax, ay);
+  }
+  // labels keep clear of every object, including ones that only appear later in the story
+  const solid = sc.objs.filter((ob) => !ob.free).map((ob) => ({ ob, box: growBox(aabbScreen(ob.box), -5) }));
   const LS = 14, SS = 11.5;
   // points along every floor link, so labels can keep clear of them
   const linkDots = [];
@@ -731,7 +906,7 @@ export function compile(sc) {
     const callouts = ob.res.callouts || [];
     for (const c of callouts) {
       const [ax, ay] = proj(ob.x + c.at[0] * ob.k, ob.y + c.at[1] * ob.k, ob.z + c.at[2] * ob.k);
-      overlay += wrap(calloutSvg(ax, ay, c), opacityStyle(ob), hiddenAttr(ob));
+      overlay += steady(wrap(calloutSvg(ax, ay, c), opacityStyle(ob), hiddenAttr(ob)), ax, ay);
     }
     if (!lines.length) continue;
     if (String(ob.label || '').length > 24) note('hint', 'label-long', `Label "${ob.label}" is long (${String(ob.label).length} characters). Keep labels to 1–3 words and move detail into sub: or a caption.`);
@@ -766,7 +941,7 @@ export function compile(sc) {
       svg += `<circle cx="${r1(bx)}" cy="${r1(by)}" r="9.5" fill="${A}"/><text x="${r1(bx)}" y="${r1(by + 4)}" font-size="11.5" font-family="${esc(th.font)}" font-weight="800" text-anchor="middle" fill="${material(th, 'accent').on}">${esc(ob.opts.badge)}</text>`;
       pos.box.x0 -= 26;
     }
-    overlay += wrap(wrap(svg, opacityStyle(ob), hiddenAttr(ob)), ob.tracks.move ? trackStyle(ob.tracks.move) : '');
+    overlay += wrap(aside(wrap(svg, opacityStyle(ob), hiddenAttr(ob))), ob.tracks.move ? trackStyle(ob.tracks.move) : '');
     grow(pos.box);
     if (ob.tracks.move) for (const sg of ob.tracks.move.segs) grow({ x0: pos.box.x0 + sg.to[0], x1: pos.box.x1 + sg.to[0], y0: pos.box.y0 + sg.to[1], y1: pos.box.y1 + sg.to[1] });
   }
@@ -851,27 +1026,39 @@ export function compile(sc) {
     });
   }
 
-  if (o.aspect) {
-    const ar = typeof o.aspect === 'number' ? o.aspect : (() => { const [a, b] = String(o.aspect).split(/[:/x]/).map(Number); return a / b; })();
+  // size: [w, h] fixes the image's width and height, so rebuilding never changes the space it takes on a page
+  if (o.size && !(Array.isArray(o.size) && o.size[0] > 0 && o.size[1] > 0)) throw new Error(`size must be [width, height] in pixels, e.g. size: [640, 480]; got ${JSON.stringify(o.size)}.`);
+  if (o.aspect || o.size) {
+    const ar = o.size ? o.size[0] / o.size[1] : typeof o.aspect === 'number' ? o.aspect : (() => { const [a, b] = String(o.aspect).split(/[:/x]/).map(Number); return a / b; })();
     if (!(ar > 0)) throw new Error(`aspect must look like '16:9' or a number, got "${o.aspect}".`);
     const w = vb.x1 - vb.x0, h = vb.y1 - vb.y0;
     if (w / h < ar) { const add = (h * ar - w) / 2; vb.x0 -= add; vb.x1 += add; } else { const add = (w / ar - h) / 2; vb.y0 -= add; vb.y1 += add; }
   }
   vb = { x0: Math.floor(vb.x0), y0: Math.floor(vb.y0), x1: Math.ceil(vb.x1), y1: Math.ceil(vb.y1) };
+  let headingSvg = '';
   if (o.heading) {
-    overlay += `<text x="${vb.x0 + 40}" y="${vb.y0 + 58}" font-size="24" font-family="${esc(th.font)}" font-weight="750" letter-spacing="-0.3" fill="${th.text.color}">${esc(o.heading)}</text>`;
-    if (o.subheading) overlay += `<text x="${vb.x0 + 40}" y="${vb.y0 + 82}" font-size="14" font-family="${esc(th.font)}" font-weight="500" fill="${th.text.muted}">${esc(o.subheading)}</text>`;
+    headingSvg += `<text x="${vb.x0 + 40}" y="${vb.y0 + 58}" font-size="24" font-family="${esc(th.font)}" font-weight="750" letter-spacing="-0.3" fill="${th.text.color}">${esc(o.heading)}</text>`;
+    if (o.subheading) headingSvg += `<text x="${vb.x0 + 40}" y="${vb.y0 + 82}" font-size="14" font-family="${esc(th.font)}" font-weight="500" fill="${th.text.muted}">${esc(o.subheading)}</text>`;
+  }
+  if (smallText.length) {
+    const worst = smallText.reduce((a, b) => (b.px < a.px ? b : a));
+    note('hint', 'text-small', `Text drawn on a face is too small to read: "${worst.text.slice(0, 20)}" is ${r1(worst.px)} px high${smallText.length > 1 ? ` (and ${smallText.length - 1} more)` : ''}. Use size 0.24 or more (0.3 reads well), or say it with a label, a callout or a caption instead.`);
+  }
+  {
+    const wide = vb.x1 - vb.x0, onPhone = (14 * 360) / wide;
+    if (onPhone < 6) note('hint', 'phone-text', `This picture is ${Math.round(wide)} px wide, so on a phone (360 px) its labels shrink to about ${r1(onPhone)} px. If it will be read on phones, fold the layout into two lanes or an L so it is narrower, or build a second, simpler version for small screens.`);
   }
   const W = vb.x1 - vb.x0, H = vb.y1 - vb.y0;
+  const outW = o.size ? Math.round(o.size[0]) : W, outH = o.size ? Math.round(o.size[1]) : H;
   const mx = (bounds.x0 + bounds.x1) / 2, my = (bounds.y0 + bounds.y1) / 2;
 
-  let bg = '';
+  let bg = '', floorBg = '';
   if (o.background) {
     let fill = th.bg.from;
     if (th.bg.type === 'radial') fill = `url(#${def('bg', (id) => `<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${r1(mx)}" cy="${r1(my)}" r="${r1(Math.max(W, H) * 0.72)}"><stop offset="0" stop-color="${th.bg.from}"/><stop offset="1" stop-color="${th.bg.to}"/></radialGradient>`)})`;
     else if (th.bg.type === 'linear') fill = `url(#${def('bg', (id) => `<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${th.bg.from}"/><stop offset="1" stop-color="${th.bg.to}"/></linearGradient>`)})`;
     bg += `<rect x="${vb.x0}" y="${vb.y0}" width="${W}" height="${H}" fill="${fill}"/>`;
-    if (th.floor.spotAlpha > 0) bg += `<ellipse cx="${r1(mx)}" cy="${r1(my + (bounds.y1 - bounds.y0) * 0.12)}" rx="${r1((bounds.x1 - bounds.x0) * 0.62)}" ry="${r1((bounds.x1 - bounds.x0) * 0.62 * 0.52)}" fill="url(#${glowGrad(th.floor.spot, th.floor.spotAlpha)})"/>`;
+    if (th.floor.spotAlpha > 0) floorBg += `<ellipse cx="${r1(mx)}" cy="${r1(my + (bounds.y1 - bounds.y0) * 0.12)}" rx="${r1((bounds.x1 - bounds.x0) * 0.62)}" ry="${r1((bounds.x1 - bounds.x0) * 0.62 * 0.52)}" fill="url(#${glowGrad(th.floor.spot, th.floor.spotAlpha)})"/>`;
   }
   const gridKind = o.grid === false ? 'none' : o.grid === true ? (th.floor.grid === 'none' ? 'dots' : th.floor.grid) : typeof o.grid === 'string' ? o.grid : o.background ? th.floor.grid : 'none';
   if (gridKind !== 'none') {
@@ -892,19 +1079,29 @@ export function compile(sc) {
     }
     const fadeR = Math.max(bounds.x1 - bounds.x0, (bounds.y1 - bounds.y0) * 1.7) * 0.62 + 120;
     const mask = def('gridmask', (id) => `<radialGradient id="${id}g" gradientUnits="userSpaceOnUse" cx="${r1(mx)}" cy="${r1(my)}" r="${r1(fadeR)}" gradientTransform="translate(0 ${r1(my * 0.42)}) scale(1 0.58)"><stop offset="0.25" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient><mask id="${id}" maskUnits="userSpaceOnUse" x="${vb.x0}" y="${vb.y0}" width="${W}" height="${H}"><rect x="${vb.x0}" y="${vb.y0}" width="${W}" height="${H}" fill="url(#${id}g)"/></mask>`);
-    bg += `<path d="${d}" fill="none" stroke="${th.floor.color}" stroke-opacity="${th.floor.alpha}" stroke-width="${gridKind === 'lines' ? 1 : 2.2}" stroke-linecap="round" mask="url(#${mask})"/>`;
+    floorBg += `<path d="${d}" fill="none" stroke="${th.floor.color}" stroke-opacity="${th.floor.alpha}" stroke-width="${gridKind === 'lines' ? 1 : 2.2}" stroke-linecap="round" mask="url(#${mask})"/>`;
   }
 
   // ================================================================ 7. lint
 
-  const vis = sc.objs.filter((ob) => !ob.hidden);
+  const vis = sc.objs.filter((ob) => !ob.hidden && !ob.free);
+  // an object sunk into the floor only takes up the part of its height that shows
+  const standing = (ob) => (ob.level < 1 ? { ...ob.box, z1: ob.box.z0 + (ob.box.z1 - ob.box.z0) * Math.max(0.02, ob.level) } : ob.box);
   for (let i = 0; i < sc.objs.length; i++) for (let j = i + 1; j < sc.objs.length; j++) {
     const a = sc.objs[i], b = sc.objs[j];
-    if (a.parent === b || b.parent === a || (a.hidden !== b.hidden)) continue;
-    if (aabbIntersects(a.box, b.box, 0.04)) note('warn', 'overlap', `"${a.id}" and "${b.id}" occupy the same space, so they will cut into each other. Move one of them (they need about ${r1((a.w + b.w) / 2 + 0.4)} cells between centres along x, or ${r1((a.d + b.d) / 2 + 0.4)} along y), or stack with on:.`);
+    if (a.parent === b || b.parent === a || (a.hidden !== b.hidden) || a.free || b.free) continue;
+    if (aabbIntersects(standing(a), standing(b), 0.04)) note('warn', 'overlap', `"${a.id}" and "${b.id}" occupy the same space, so they will cut into each other. Move one of them (they need about ${r1((a.w + b.w) / 2 + 0.4)} cells between centres along x, or ${r1((a.d + b.d) / 2 + 0.4)} along y), or stack with on:.`);
   }
   if (vis.length > 16) note('warn', 'crowded', `${vis.length} objects is a lot for one picture. The clearest scenes use 3–9 objects; cut supporting detail or split the idea into two scenes.`);
   else if (vis.length > 11) note('hint', 'crowded', `${vis.length} objects: check that each one is needed to explain the idea.`);
+  // a callout's words should sit on clear background, not on an object or on another callout
+  calloutBoxes.forEach((c, i) => {
+    const tight = growBox(c.box, -3);
+    // the object a callout points into is the one it is about; only other objects count
+    const onObj = vis.find((ob) => { const sb = aabbScreen(ob.box); return !(c.ax >= sb.x0 - 6 && c.ax <= sb.x1 + 6 && c.ay >= sb.y0 - 6 && c.ay <= sb.y1 + 6) && boxesOverlap(tight, growBox(sb, -6)); });
+    const onOther = calloutBoxes.find((d, j) => j < i && !(c.timed && d.timed) && boxesOverlap(tight, growBox(d.box, -3)));
+    if (onObj || onOther) note('hint', 'callout-overlap', `The callout "${c.text}" sits on ${onObj ? `"${onObj.id}"` : `the callout "${onOther.text}"`}. Move its words onto clear background with side: 'left' | 'right', rise (pixels up, negative for down) and length.`);
+  });
   const heroes = sc.objs.filter((ob) => ob.hero);
   if (vis.length >= 4 && heroes.length === 0 && !sc.objs.some((ob) => ob.opts.glow || ['accent', 'accent2'].includes(ob.opts.color))) note('hint', 'no-hero', 'No focal point. Mark the single most important object with hero: true so the eye has somewhere to land.');
   if (heroes.length > 2) note('hint', 'many-heroes', `${heroes.length} objects are marked hero. One focal point reads best; keep hero: true for the single most important object.`);
@@ -922,8 +1119,48 @@ export function compile(sc) {
   // ================================================================ 8. assemble
 
   const hazeSvg = o.background && o.haze !== false && th.haze > 0 && H > 320 ? `<rect x="${vb.x0}" y="${vb.y0}" width="${W}" height="${Math.round(H * 0.5)}" fill="url(#${def('haze', (id) => `<linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${th.bg.to}" stop-opacity="${typeof o.haze === 'number' ? o.haze : th.haze}"/><stop offset="1" stop-color="${th.bg.to}" stop-opacity="0"/></linearGradient>`)})" pointer-events="none"/>` : '';
-  const sortedWorld = depthSort(world).map((w) => w.svg).join('');
+  const worldOrder = depthSort(world);
+  const sortedWorld = worldOrder.map((w) => w.svg).join('');
+  // An object that slides keeps the drawing order of the place it started. If it ends up in front of
+  // something it is drawn behind (or the other way round), it will look wrong when it gets there.
+  {
+    const rank = new Map(worldOrder.map((w, i) => [w.ob, i]));
+    const eps = 0.011, seenPairs = new Set();
+    for (const a of sc.objs) {
+      if (!a.movedTo || a.free || !rank.has(a)) continue;
+      for (const d of a.movedTo) {
+        const A = aabbShift(a.box, d);
+        for (const b of sc.objs) {
+          if (b === a || b.free || b.hidden || b.parent === a || a.parent === b || !rank.has(b) || seenPairs.has(b)) continue;
+          const B = b.box;
+          if (!boxesOverlap(aabbScreen(A), aabbScreen(B))) continue;
+          const aFront = A.x1 > B.x0 + eps && A.y1 > B.y0 + eps && A.z1 > B.z0 + eps, bFront = B.x1 > A.x0 + eps && B.y1 > A.y0 + eps && B.z1 > A.z0 + eps;
+          if (aFront === bFront) continue;
+          const drawnInFront = rank.get(a) > rank.get(b);
+          if (drawnInFront !== aFront) {
+            seenPairs.add(b);
+            note('warn', 'move-depth', `"${a.id}" moves ${aFront ? 'in front of' : 'behind'} "${b.id}" but will be drawn ${aFront ? 'behind' : 'in front of'} it, because an object that slides keeps the drawing order of the place where it starts. Start "${a.id}" where it ends and move it the other way; or lay the scene out so it starts ${aFront ? 'nearer the viewer (larger x + y)' : 'further from the viewer (smaller x + y)'} than "${b.id}"; or make the trip a token instead: s.send(from, to, { as: '${a.kind}' }).`);
+          }
+        }
+      }
+    }
+  }
   const fadeIn = (delay, dur = 0.5) => (o.intro ? `animation:${kf('from{opacity:0}to{opacity:1}')} ${dur}s ease-out ${r2(delay)}s both` : '');
+  // the camera: one transform over everything in the scene, leaving backdrop, heading and captions where they are
+  let cameraOpen = '';
+  if (cameraSteps.length) {
+    const cxm = vb.x0 + W / 2, cym = vb.y0 + (H - (captions.length ? 46 : 0)) / 2;
+    const cam = new Track('camera', [0, 0, 1]);
+    for (const c of cameraSteps) {
+      const f = c.focus ? projP(c.focus) : null;
+      cam.to(c.t0, c.t1, f ? [cxm - c.k * f[0], cym - c.k * f[1], c.k] : [0, 0, 1], c.ease);
+    }
+    cam.close(T);
+    // the zoomed scene stays out of the strip the captions are written in
+    const strip = captions.length ? 46 : 0;
+    const clip = strip ? def('camclip', (id) => `<clipPath id="${id}"><rect x="${vb.x0}" y="${vb.y0}" width="${W}" height="${H - strip}"/></clipPath>`) : null;
+    cameraOpen = `<g${clip ? ` clip-path="url(#${clip})"` : ''}><g style="${trackStyle(cam)}">`;
+  }
   const css = [
     ...[...kfs.entries()].map(([body, name]) => `@keyframes ${name}{${body}}`),
     `#${uid}.is-paused *{animation-play-state:paused!important}`,
@@ -931,21 +1168,32 @@ export function compile(sc) {
   ].join('');
   const title = o.title || o.heading || 'Isometric illustration';
   const desc = o.desc || (sc.objs.filter((ob) => ob.label).length ? `Shows: ${sc.objs.filter((ob) => ob.label).map((ob) => ob.label).join(', ')}.` : '');
-  const svg = [
-    `<svg xmlns="http://www.w3.org/2000/svg" id="${uid}" viewBox="${vb.x0} ${vb.y0} ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="${uid}-t${desc ? ` ${uid}-s` : ''}" data-loop="${r2(T)}" data-intro="${introEnd}"${o.background ? ` data-bg="${th.bg.to}"` : ''}${th.dark ? ' data-dark="1"' : ''}${captions.length ? ` data-chapters="${esc(JSON.stringify(captions.map((c) => ({ t: +c.t.toFixed(2), text: c.text }))))}"` : ''}${keyTimes.length ? ` data-keys="${[...new Set([...keyTimes, T - 0.95].map((t) => Math.max(0, Math.min(T - 0.05, t)).toFixed(2)))].join(' ')}"` : ''} font-family="${esc(th.font)}">`,
+  const pieces = [
+    `<svg xmlns="http://www.w3.org/2000/svg" id="${uid}" viewBox="${vb.x0} ${vb.y0} ${W} ${H}" width="${outW}" height="${outH}" role="img" aria-labelledby="${uid}-t${desc ? ` ${uid}-s` : ''}" data-loop="${r2(T)}" data-intro="${introEnd}"${o.background ? ` data-bg="${th.bg.to}"` : ''}${th.dark ? ' data-dark="1"' : ''}${captions.length ? ` data-chapters="${esc(JSON.stringify(captions.map((c) => ({ t: +c.t.toFixed(2), text: c.text }))))}"` : ''}${keyTimes.length ? ` data-keys="${[...new Set([...keyTimes, T - 0.95].map((t) => Math.max(0, Math.min(T - 0.05, t)).toFixed(2)))].join(' ')}"` : ''} font-family="${esc(th.font)}">`,
     `<title id="${uid}-t">${esc(title)}</title>`, desc ? `<desc id="${uid}-s">${esc(desc)}</desc>` : '',
     `<style>${css}</style>`,
     `<defs>${[...defs.values()].map((d) => d.svg).join('')}</defs>`,
     bg ? `<g>${bg}</g>` : '',
+    cameraOpen,
+    floorBg ? `<g>${floorBg}</g>` : '',
     wrap(floor + glowLayer + shadowLayer + linkLayer + ringLayer + floorFx, fadeIn(0, 0.6)),
     `<g>${sortedWorld}</g>`,
-    hazeSvg,
     motes,
     air ? wrap(air, fadeIn(introEnd * 0.6)) : '',
     wrap(overlay, fadeIn(Math.max(0, introEnd - 0.35), 0.45)),
+    cameraOpen ? '</g></g>' : '',
+    hazeSvg,
+    headingSvg ? wrap(headingSvg, fadeIn(Math.max(0, introEnd - 0.35), 0.45)) : '',
     captionSvg ? wrap(captionSvg, fadeIn(Math.max(0, introEnd - 0.2))) : '',
     '</svg>',
-  ].join('');
+  ];
+  const svg = pieces.join('');
+  if (svg.length > 150 * 1024) {
+    // say what the size is made of, so the cure is obvious
+    const kfBytes = css.length, kfCount = (css.match(/@keyframes/g) || []).length;
+    const heavy = world.map((w) => ({ id: w.ob ? w.ob.id : '?', kb: w.svg.length / 1024 })).sort((a, b) => b.kb - a.kb).slice(0, 2).filter((w) => w.kb > 12);
+    note('hint', 'large', `The SVG is ${Math.round(svg.length / 1024)} KB; most scenes are 30 to 80. ${Math.round(kfBytes / 1024)} KB of it is ${kfCount} sets of keyframes${heavy.length ? `, and the heaviest objects are ${heavy.map((w) => `${w.id} (${Math.round(w.kb)} KB)`).join(' and ')}` : ''}. Many separately keyed dots are the usual cause: sh.stream, or flow on a link, moves any number of particles with a handful of shared keyframes.`);
+  }
 
-  return { svg, width: W, height: H, loop: T, intro: introEnd, notes, objects: sc.objs.length, bytes: svg.length };
+  return { svg, width: outW, height: outH, loop: T, intro: introEnd, notes, objects: sc.objs.length, bytes: svg.length, motion: () => ({ timeline, parts: probe.report(), flows }) };
 }

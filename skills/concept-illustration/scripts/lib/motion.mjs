@@ -28,6 +28,7 @@ export const EASE_FN = {
   out: bez(0.16, 1, 0.3, 1),
   in: bez(0.7, 0, 0.84, 0),
   sine: bez(0.37, 0, 0.63, 1),
+  back: bez(0.34, 1.56, 0.64, 1),
 };
 
 const pct = (t, T) => {
@@ -41,6 +42,7 @@ const fmt = (prop, v) => {
     case 'translate': return `transform:translate(${+v[0].toFixed(2)}px,${+v[1].toFixed(2)}px)`;
     case 'scale': return Array.isArray(v) ? `transform:scale(${+v[0].toFixed(4)},${+v[1].toFixed(4)})` : `transform:scale(${+(+v).toFixed(4)})`;
     case 'rotate': return `transform:rotate(${+(+v).toFixed(2)}deg)`;
+    case 'camera': return `transform:translate(${+v[0].toFixed(1)}px,${+v[1].toFixed(1)}px) scale(${+v[2].toFixed(3)})`;
     case 'dash': return `stroke-dashoffset:${+(+v).toFixed(2)}`;
     default: return `${prop}:${v}`;
   }
@@ -129,7 +131,7 @@ export function snapPeriod(period, T) {
 
 // ---------------------------------------------------------------- story scheduling
 
-const DEFAULT_DUR = { pulse: 0.7, glow: 1.1, pop: 0.55, show: 0.45, hide: 0.4, lift: 0.7, drop: 0.6, tint: 0.5, untint: 0.5, shake: 0.5, say: 0, wait: 0.5, flash: 0.6, grow: 0.8, move: 1, mark: 0.5, unmark: 0.3 };
+const DEFAULT_DUR = { zoom: 1.1, pulse: 0.7, glow: 1.1, pop: 0.55, show: 0.45, hide: 0.4, lift: 0.7, drop: 0.6, tint: 0.5, untint: 0.5, shake: 0.5, say: 0, wait: 0.5, flash: 0.6, grow: 0.8, move: 1, mark: 0.5, unmark: 0.3 };
 
 /**
  * Lay steps out on a timeline. A plain array is a sequence; an array nested inside it runs in
@@ -142,14 +144,19 @@ export function schedule(steps, t0, gap, durOf, parallel = false, read = { since
     if (!st) continue;
     let start = parallel ? t0 : t;
     if (Array.isArray(st)) {
+      // a caption inside a group must arrive with the things it describes: if the caption before it
+      // still needs reading time, the whole group waits, not the caption alone
+      if (st.some((x) => x && !Array.isArray(x) && x.type === 'say' && x.at == null) && start - read.since < read.need) { start = read.since + read.need; if (!parallel) t = start; }
       const sub = schedule(st, start, gap, durOf, !parallel, read);
       out.push(...sub.items);
       if (parallel) end = Math.max(end, sub.end); else { t = sub.end + gap; end = sub.end; }
       continue;
     }
+    // at: an absolute time on the scene clock. The step starts then, whatever came before it.
+    if (st.at != null && Number.isFinite(+st.at)) { start = +st.at; if (!parallel) t = start; }
     if (st.type === 'say') {
       // a caption stays long enough to be read before the next one replaces it
-      if (start - read.since < read.need) { start = read.since + read.need; if (!parallel) t = start; }
+      if (st.at == null && start - read.since < read.need) { start = read.since + read.need; if (!parallel) t = start; }
       read.since = start;
       read.need = Math.max(1.3, String(st.text || '').length * 0.042);
     }

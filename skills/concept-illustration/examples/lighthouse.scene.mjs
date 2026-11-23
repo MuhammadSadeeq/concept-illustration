@@ -1,9 +1,8 @@
 // A lighthouse sweeping its beam over the water: monitoring, alerting, keeping watch.
 // Pattern: a vignette on a dark look. The beam is flat artwork on a level plane that turns in
 // that plane, so it sweeps the way a real beam does, and it fades out with distance.
-// The frame is cropped to the still objects, so the padding leaves room for the sweep.
 export default ({ scene }) => {
-  const s = scene({ look: 'abyss', floor: 'rings', title: 'A lighthouse keeping watch over the water', loop: 8, pad: [118, 78] });
+  const s = scene({ look: 'abyss', floor: 'rings', title: 'A lighthouse keeping watch over the water', loop: 8, pad: 36 });
 
   s.custom({
     at: [0, 0], round: true,

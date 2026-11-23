@@ -201,6 +201,268 @@ throws('a builder must return parts', () => { const s = iso.scene({}); s.define(
   ok('dark looks are marked for review sheets', r.svg.includes('data-dark="1"'));
 }
 
+// one clock, checking tools and components
+{
+  const { scene } = iso;
+  const { cropSvg } = await import('../skills/concept-illustration/scripts/render.mjs');
+  const mk = (extra = () => {}) => {
+    const s = scene({ look: 'studio', title: 'Clock', loop: 6 });
+    const m = s.custom({ at: [0, 0], id: 'machine', parts: (sh) => [
+      sh.box({ w: 4, d: 1.2, h: 0.3, color: 'body' }),
+      sh.box({ name: 'gate', z: 0.3, w: 0.2, d: 1, h: 0.9, color: 'accent', anim: { type: 'keys', period: 6, keys: [{ at: 0, move: [0, 0, 0] }, { at: 0.5, move: [0, 0, 1] }, { at: 1, move: [0, 0, 0] }] } }),
+      sh.sphere({ name: 'moon', z: 2, r: 0.15, color: 'accent2', anim: { type: 'orbit', axis: 'z', r: 1, period: 6, sense: 'ccw' } }),
+      sh.box({ name: 'late', x: 1.5, z: 0.3, w: 0.3, d: 0.3, h: 0.3, anim: { type: 'move', by: [0, 0, 1], period: 6, hold: 0, delay: 1 } }),
+      sh.box({ name: 'early', x: -1.5, z: 0.3, w: 0.3, d: 0.3, h: 0.3, anim: { type: 'move', by: [0, 0, 1], period: 6, hold: 0, phase: 0.25 } }),
+    ] });
+    extra(s, m);
+    return s;
+  };
+  const r = mk((s, m) => {
+    s.callout([0, 0, 2], 'Only for a while', { from: 2, until: 4 });
+    s.story([s.say('First', { at: 0.5 }), s.say('Second', { at: 3 }), s.pulse(m, { at: 4 })]);
+  }).build();
+  // every repeating motion is timed from the moment the story starts
+  const delays = [...r.svg.matchAll(/animation:[\w-]+ ([\d.]+)s [^;"]*? (-?[\d.]+)s infinite/g)].map((m) => +m[2]);
+  ok('loops that share the scene clock start no later than the story', delays.length > 3 && delays.filter((d) => d > r.intro + 0.001).length === 0);
+  ok('captions pinned with at: land on those seconds', /&quot;t&quot;:0.5,/.test(r.svg) && /&quot;t&quot;:3,/.test(r.svg));
+  ok('a timed callout fades in and out', /Only for a while/.test(r.svg) && r.svg.split('Only for a while')[0].lastIndexOf('<g style="animation:') > r.svg.split('Only for a while')[0].length - 900);
+  const motion = r.motion();
+  ok('motion report lists the story and the parts', motion.timeline.some((t) => /caption "Second"/.test(t.text) && Math.abs(t.t0 - 3) < 1e-6) && motion.parts.some((l) => /machine › moon\s+circles the z axis anticlockwise/.test(l)) && motion.parts.some((l) => /gate/.test(l)));
+
+  const facts = mk((s, m) => {
+    s.expect(3, (at) => Math.abs(at('gate').z - 1.75) < 0.01, 'gate is fully up at half time');
+    s.expect(1.5, (at) => at('moon').y < -0.99 && Math.abs(at('moon').x) < 0.01, 'anticlockwise in the picture: +x round to -y');
+    s.expect(1, (at) => Math.abs(at('late').z - 0.45) < 0.01, 'a delayed part has not started after its delay');
+    s.expect(1.5, (at) => Math.abs(at('early').z - 1.45) < 0.01, 'a part with phase 0.25 is a quarter period ahead');
+    s.expect([0, 6], (at) => at(m).x === 0 && at('gate').z >= 0.74, 'ranges are checked throughout');
+  }).build();
+  ok('true expectations pass', !facts.notes.some((n) => n.code === 'expect'), facts.notes.map((n) => n.msg).join(' | '));
+  const wrong = mk((s) => s.expect(3, (at) => at('gate').z < 1, 'gate is down at 3 s')).build();
+  ok('a false expectation is reported with what was found', wrong.notes.some((n) => n.level === 'warn' && n.code === 'expect' && /gate at \(0, 0, 1\.75\)/.test(n.msg)));
+  throws('expect names what exists', () => mk((s) => s.expect(1, (at) => at('nothing').x > 0)).build(), /Named parts: .*gate/);
+
+  const c = scene({ look: 'ocean', title: 'Components', loop: 8, size: [640, 480] });
+  c.custom({ at: [0, 0], id: 'rig', parts: (sh) => [
+    sh.box({ w: 3, d: 2, h: 0.2, color: 'body', top: (fw, fh) => [
+      { t: 'bar', x: 0.2, y: 0.2, w: 0.2, h: 1, fill: 'accent', levels: [[0, 0.2], [0.5, 0.9], [1, 0.2]] },
+      { t: 'bar', x: 0.6, y: 0.2, w: 1, h: 0.2, fill: 'gold', level: 0.5, from: 'left' },
+      { t: 'readout', x: 2, y: 1, size: 0.3, fill: 'paper', values: [[0, '0'], [0.5, '27']] },
+    ] }),
+    sh.stream({ points: [[-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]], closed: true, count: 12, period: 8, color: 'gold' }),
+    sh.stream({ points: [[-2, 0, 1.5], [2, 0, 1.5]], mode: 'alternate', swing: 0.2, wavelength: 2, period: 2, count: 10 }),
+    sh.stream({ points: [[-2, 0, 2], [2, 0, 2]], mode: 'zigzag', count: 6, period: 4 }),
+    sh.arrow({ from: [0, 0, 2.4], to: [1.5, 0, 2.4], color: 'danger' }),
+    sh.ripple({ z: 0.22, r: 0.8, count: 2 }),
+    sh.sphere({ z: 3, r: 0.1, anim: { type: 'keys', period: 8, fade: true, keys: [{ at: 0, move: [0, 0, 0] }, { at: 1, move: [6, 0, 0] }] } }),
+  ] });
+  const cr = c.build();
+  ok('size fixes the image size', cr.width === 640 && cr.height === 480 && /width="640" height="480"/.test(cr.svg));
+  ok('streams share keyframes', (cr.svg.match(/@keyframes/g) || []).length < 40 && (cr.svg.match(/<circle r="2\.4"/g) || []).length >= 28, `${(cr.svg.match(/@keyframes/g) || []).length} keyframes`);
+  ok('bar, readout and role colours in artwork', />27<\/text>/.test(cr.svg) && /step-end/.test(cr.svg) && /scale\(1,0\.9\)/.test(cr.svg) && !/fill="(accent|gold|paper|danger)"/.test(cr.svg));
+  ok('arrow and ripple draw', /stroke-linejoin="round"\/>/.test(cr.svg) && /scale\(\.3\)/.test(cr.svg));
+  ok('the frame holds a part over its whole travel', (() => { const vb = cr.svg.match(/viewBox="([-\d. ]+)"/)[1].split(' ').map(Number); const far = iso.scene ? 6 * 34.64 : 0; return vb[0] + vb[2] > far; })());
+  ok('fade hides a jump at the restart', /0%\{opacity:0\}5%\{opacity:1\}95%\{opacity:1\}100%\{opacity:0\}/.test(cr.svg));
+  ok('moving components count as motion', !cr.notes.some((n) => n.code === 'static'));
+  const crop = cropSvg(cr.svg, { focus: 'rig', zoom: 2 });
+  ok('cropSvg zooms on an object', /viewBox="[-\d. ]+" width="\d+" height="\d+"/.test(crop) && +crop.match(/viewBox="[-\d.]+ [-\d.]+ ([\d.]+)/)[1] < +cr.svg.match(/viewBox="[-\d.]+ [-\d.]+ ([\d.]+)/)[1]);
+  throws('cropSvg names the ids', () => cropSvg(cr.svg, { focus: 'nope' }), /Ids in this scene: rig/);
+  const tiny = scene({ look: 'paper', title: 'Tiny' });
+  tiny.custom({ at: [0, 0], parts: (sh) => [sh.box({ w: 1, d: 1, h: 1, left: () => [{ t: 'text', x: 0.5, y: 0.5, text: 'small', size: 0.12 }] })] });
+  ok('unreadable text is flagged', tiny.build().notes.some((n) => n.code === 'text-small'));
+}
+
+// camera, series, pass-through check, size hint
+{
+  const { scene } = iso;
+  const series = { look: 'paper', accent: '#2f6fed', size: [640, 480], kinds: { post: (o, sh) => ({ parts: [sh.box({ w: 0.5, d: 0.5, h: 1.2, color: o.color })] }) } };
+  const a = scene({ series, title: 'One of a set' }), b = scene({ series, title: 'Another', look: 'aurora' });
+  a.add('post', { at: [0, 0], label: 'Shared kind' }); b.add('post', { at: [0, 0] });
+  const ar = a.build(), br = b.build();
+  ok('a series shares look, size and kinds', a.look === 'paper' && ar.width === 640 && ar.height === 480 && a.theme.roles.accent.toLowerCase() === '#2f6fed' && br.width === 640);
+  ok('a scene can override its series', b.look === 'aurora');
+
+  const z = scene({ look: 'paper', title: 'Zoom', loop: 9 });
+  const p = z.add('cube', { at: [0, 0], label: 'Near' }), q = z.add('cube', { at: [4, 0], label: 'Far' });
+  z.callout([4, 0, 1.2], 'A part');
+  z.story([z.say('Whole scene', { at: 0.4 }), z.zoom(q, 2.5, { at: 3 }), z.say('Closer', { at: 3.2 }), z.zoom(null, 1, { at: 6 })]);
+  const zr = z.build();
+  ok('zoom moves a camera over the scene', /scale\(2\.5\)/.test(zr.svg) && /clip-path="url\(#[^"]+\)"><g style="animation:/.test(zr.svg) && zr.motion().timeline.some((t) => /zoom in 2.5× on cube/.test(t.text)));
+  ok('callouts keep their size under the camera', /scale\(0\.4\)/.test(zr.svg));
+  throws('zoom needs a sensible factor', () => z.zoom(p, 0), /how many times closer/);
+
+  const crash = (grouped) => {
+    const s = scene({ look: 'studio', title: 'Crossing', loop: 6 });
+    const slide = { type: 'keys', period: 6, keys: [{ at: 0, move: [0, 0, 0] }, { at: 0.5, move: [3, 0, 0] }, { at: 1, move: [0, 0, 0] }] };
+    s.custom({ at: [0, 0], parts: (sh) => {
+      const post = sh.box({ name: 'post', w: 0.4, d: 0.4, h: 1.2 }), slider = sh.box({ name: 'slider', x: -1.5, z: 0.4, w: 0.5, d: 0.3, h: 0.3, color: 'accent', anim: slide });
+      return grouped ? [sh.group({ sort: false, parts: [slider, post] })] : [post, slider];
+    } });
+    return s.build().notes;
+  };
+  ok('a part that passes through another is reported', crash(false).some((n) => n.code === 'passes-through' && /"slider" passes through "post"/.test(n.msg)));
+  ok('parts declared to slide inside one another are not', !crash(true).some((n) => n.code === 'passes-through'));
+
+  const big = scene({ look: 'paper', title: 'Heavy' });
+  big.custom({ at: [0, 0], id: 'swarm', parts: (sh) => Array.from({ length: 260 }, (_, i) => sh.sphere({ x: (i % 20) * 0.3 - 3, y: Math.floor(i / 20) * 0.3 - 2, z: 0.5, r: 0.06,
+    anim: { type: 'keys', period: 6, keys: Array.from({ length: 12 }, (_, k) => ({ at: k / 11, move: [Math.sin(i + k) * 0.3, Math.cos(i * 2 + k) * 0.3, 0] })) } })) });
+  const bn = big.build();
+  ok('a very large SVG says what it is made of', bn.bytes > 150 * 1024 && bn.notes.some((n) => n.code === 'large' && /sets of keyframes/.test(n.msg) && /swarm/.test(n.msg)), `${Math.round(bn.bytes / 1024)} KB`);
+}
+
+// findings from the third round of small-model tests
+{
+  const { scene } = iso;
+  // shapes that are not objects never get in the way
+  const c = scene({ look: 'sky', title: 'Loop', loop: 8 });
+  const a = c.add('cube', { at: [0, 0], label: 'A' }), b = c.add('cube', { at: [5, 0], label: 'B' });
+  c.link(a, b, { arrow: false, flow: { reverse: true, jitter: 0.07, speed: 0.6 } });
+  const drawn = c.draw((sh) => [sh.stream({ points: [[-1, -1, 0.1], [6, -1, 0.1], [6, 1, 0.1], [-1, 1, 0.1]], closed: true, count: 10 }), sh.arrow({ from: [0, 0, 1.5], to: [5, 0, 1.5] })]);
+  const cr = c.build();
+  ok('drawings are never obstacles', drawn.free && !cr.notes.some((n) => ['overlap', 'link-through', 'label-overlap'].includes(n.code)), cr.notes.map((n) => n.code).join(','));
+  ok('reversed, jostling flow is reported', cr.motion().flows.some((f) => /travel backwards, from cube\d+ to cube\d+, jostling/.test(f)));
+  throws('draw checks its layer', () => c.draw([], { layer: 'sky' }), /floor, air, sorted/);
+
+  // a caption in a group brings its group with it
+  const g = scene({ look: 'paper', title: 'Group' });
+  const p = g.add('cube', { at: [0, 0], label: 'P' }), q = g.add('cube', { at: [4.5, 0], label: 'Q' });
+  g.link(p, q);
+  g.story([g.say('A first caption that needs a moment to be read'), [g.say('Now it moves'), g.send(p, q)], g.wait(1)]);
+  const tl = g.build().motion().timeline;
+  const cap = tl.find((t) => /Now it moves/.test(t.text)), snd = tl.find((t) => /^send/.test(t.text));
+  ok('a grouped caption starts with its group', Math.abs(cap.t0 - snd.t0) < 0.01, `${cap.t0} vs ${snd.t0}`);
+
+  // zoom with hold is one step; a loop that is too short is reported
+  const z = scene({ look: 'paper', title: 'Hold', loop: 3 });
+  const o1 = z.add('cube', { at: [0, 0], label: 'One' });
+  z.story([z.zoom(o1, 2, { hold: 1 }), z.pulse(o1)]);
+  const zr = z.build(), ztl = zr.motion().timeline;
+  ok('zoom with hold goes in and comes back before the next step', ztl[0].t1 - ztl[0].t0 > 3.1 && ztl[1].t0 >= ztl[0].t1 && /scale\(2\)/.test(zr.svg));
+  ok('a story longer than the loop asked for is reported', zr.notes.some((n) => n.code === 'loop-longer'));
+
+  // keys and readouts by the clock
+  const k = scene({ look: 'paper', title: 'Seconds', loop: 10 });
+  k.custom({ at: [0, 0], id: 'rig', parts: (sh) => [
+    sh.box({ w: 2, d: 1, h: 0.4, left: (fw, fh) => [{ t: 'readout', x: fw / 2, y: fh / 2, size: 0.26, seconds: true, values: [[0, 'DAY 0'], [5, 'DAY 1']] }, { t: 'bar', x: 0.1, y: 0.05, w: 0.1, h: 0.3, fill: 'accent', seconds: true, levels: [[0, 0.2], [5, 1], [10, 0.2]] }] }),
+    sh.box({ name: 'lift', z: 0.4, w: 0.4, d: 0.4, h: 0.3, anim: { type: 'keys', period: 10, keys: [{ t: 0, move: [0, 0, 0] }, { t: 2.5, move: [0, 0, 1] }, { t: 10, move: [0, 0, 0] }] } }),
+  ] });
+  k.expect(2.5, (at) => Math.abs(at('lift').z - 1.55) < 0.01, 'a key written t: 2.5 happens at 2.5 s');
+  const kr = k.build();
+  ok('keys, bars and readouts can be timed in seconds', !kr.notes.some((n) => n.code === 'expect') && /50%\{opacity:1\}/.test(kr.svg) && /25%\{transform:translate/.test(kr.svg), kr.notes.map((n) => n.msg).join('|'));
+
+  // level-aware overlap, and level in at()
+  const w = scene({ look: 'ocean', title: 'Water', loop: 8 });
+  const water = w.add('cube', { at: [0, 0], w: 2.4, d: 2.4, h: 2, level: 0.3, id: 'water' });
+  const boat = w.custom({ at: [0, 0], z: 0.62, id: 'boat', parts: (sh) => [sh.box({ w: 0.8, d: 0.4, h: 0.3, color: 'accent' })] });
+  w.story([[w.grow(water, 0.8), w.lift(boat, 1)], w.wait(1)]);
+  w.expect(0.1, (at) => Math.abs(at(water).level - 0.3) < 0.02, 'the water starts low');
+  w.expect(4, (at) => Math.abs(at(water).level - 0.8) < 0.02, 'and has risen');
+  const wr = w.build();
+  ok('something resting on a sunk object does not overlap it', !wr.notes.some((n) => n.code === 'overlap' || n.code === 'expect'), wr.notes.map((n) => n.code + ':' + n.msg.slice(0, 60)).join('|'));
+
+  // an object that slides in front of another but is drawn behind it
+  const m = scene({ look: 'paper', title: 'Depth' });
+  const wall = m.add('cube', { at: [2, 0], w: 0.4, d: 2.4, h: 1.6, id: 'wall' });
+  const car = m.add('cube', { at: [0, 0], size: 0.7, id: 'car' });
+  m.story([m.move(car, [4, 0]), m.wait(1)]);
+  ok('a slide that ends on the wrong side of the drawing order is reported', m.build().notes.some((n) => n.code === 'move-depth' && /"car" moves in front of "wall"/.test(n.msg)));
+  const m2 = scene({ look: 'paper', title: 'Depth ok' });
+  m2.add('cube', { at: [2, 0], w: 0.4, d: 2.4, h: 1.6, id: 'wall' });
+  const car2 = m2.add('cube', { at: [4, 0], size: 0.7, id: 'car' });
+  m2.story([m2.move(car2, [6, 0]), m2.wait(1)]);
+  ok('and one that stays on its side is not', !m2.build().notes.some((n) => n.code === 'move-depth'));
+
+  // labels keep clear of objects that appear later
+  const h = scene({ look: 'paper', title: 'Later' });
+  const base = h.add('cube', { at: [0, 0], label: 'Door' });
+  const later = h.add('cube', { at: [0, 1.5], size: 0.8, hidden: true });
+  h.story([h.pop(later), h.wait(1)]);
+  const hs = h.build().svg;
+  ok('hidden objects still build', /Door/.test(hs));
+}
+
+// parts by name, and callouts that land on things
+{
+  const { scene } = iso;
+  const s = scene({ look: 'paper', title: 'Named' });
+  const bat = s.custom({ at: [2, 1], id: 'bat', scale: 2, parts: (sh) => [sh.box({ w: 1, d: 0.5, h: 0.4 }), sh.cyl({ name: 'neg', x: -0.3, z: 0.4, r: 0.08, h: 0.2 })] });
+  const pt = s.point(bat, 'neg');
+  ok('point gives the top of a named shape, scaled and placed', Math.abs(pt[0] - 1.4) < 1e-6 && Math.abs(pt[1] - 1) < 1e-6 && Math.abs(pt[2] - 1.2) < 1e-6, JSON.stringify(pt));
+  throws('point names what exists', () => s.point(bat, 'pos'), /Its named shapes: neg/);
+  const other = s.add('cube', { at: [6, 1], label: 'Other' });
+  s.callout(s.point(bat, 'neg'), 'Negative terminal');
+  s.callout([6, 1, 0.5], 'On it', { side: 'left', length: 14 });
+  s.callout([4.6, 1, 0.5], 'Lands on the cube', { length: 16 });
+  const notes = s.build().notes.filter((n) => n.code === 'callout-overlap');
+  ok('a callout on another object is reported, one about its own object is not', notes.length === 1 && /Lands on the cube/.test(notes[0].msg), notes.map((n) => n.msg.slice(0, 50)).join('|'));
+}
+
+// in a real browser, when one is available: the interactive page, and the checker against what is drawn
+{
+  const { withPage } = await import('../skills/concept-illustration/scripts/render.mjs');
+  const { experienceHtml } = await import('../skills/concept-illustration/scripts/lib/experience.mjs');
+  const { makeProbe } = await import('../skills/concept-illustration/scripts/lib/probe.mjs');
+  const { proj } = await import('../skills/concept-illustration/scripts/lib/geom.mjs');
+  const pause = (ms) => new Promise((done) => setTimeout(done, ms));
+  let ran = null;
+  try {
+    const s = iso.scene({ look: 'ocean', title: 'Interactive' });
+    const a = s.add('laptop', { at: [0, 0], label: 'A', info: 'First actor' }), b = s.add('server', { at: [4.5, 0], label: 'B', hero: true, info: 'Second actor' });
+    s.link(a, b); s.story([s.say('One'), s.send(a, b), s.say('Two'), s.send(b, a, { as: 'doc' }), s.say('Three'), s.mark(a, 'check'), s.wait(1)]);
+    const page1 = experienceHtml('demo', s.build(), { mode: 'step' });
+
+    const m = iso.scene({ look: 'studio', title: 'Probe', loop: 6 });
+    m.custom({ at: [0, 0], parts: (sh) => [
+      sh.box({ w: 4, d: 1.2, h: 0.3 }),
+      sh.box({ name: 'gate', z: 0.3, w: 0.2, d: 1, h: 0.9, anim: { type: 'keys', period: 6, keys: [{ at: 0, move: [0, 0, 0] }, { at: 0.3, move: [0, 0, 0], ease: 'in' }, { at: 0.45, move: [0, 0, 1] }, { at: 0.8, move: [0, 0, 1], ease: 'back' }, { at: 0.95, move: [0, 0, 0] }] } }),
+      sh.box({ name: 'late', x: 1.5, z: 0.3, w: 0.3, d: 0.3, h: 0.3, anim: { type: 'move', by: [1, 0, 1], period: 6, hold: 0.1, delay: 1 } }),
+      sh.box({ name: 'early', x: -1.5, z: 0.3, w: 0.3, d: 0.3, h: 0.3, anim: { type: 'move', by: [0, 1, 0.5], period: 3, hold: 0, ease: 'sine', phase: 0.25 } }),
+    ] });
+    m.story([m.say('A caption, so there is an intro and a story', { at: 1 })]);
+    const mr = m.build(), probe = makeProbe(m, mr.loop);
+    const rest = { gate: [0, 0, 0.75], late: [1.5, 0, 0.45], early: [-1.5, 0, 0.45] };
+
+    ran = await withPage({ width: 1000, height: 760 }, 1, async (page) => {
+      const errors = [];
+      page.on('pageerror', (e) => errors.push(String(e)));
+      await page.setContent(page1);
+      await pause(500);
+      const state = () => page.evaluate(() => ({
+        api: typeof window.IsoExperience === 'object', dots: document.querySelectorAll('.isox-dot').length,
+        on: [...document.querySelectorAll('.isox-dot')].findIndex((d) => d.classList.contains('isox-dot--on')),
+        hot: document.querySelectorAll('.isox-hot').length, card: !!document.querySelector('.isox-card--open'), text: (document.querySelector('.isox-card') || {}).textContent || '',
+      }));
+      const first = await state();
+      await page.evaluate(() => [...document.querySelectorAll('.isox-btn')].find((x) => (x.title || x.getAttribute('aria-label')) === 'Next chapter').click());
+      await pause(700);
+      const second = await state();
+      await page.evaluate(() => document.querySelector('.isox-hot').focus());
+      await pause(300);
+      const third = await state();
+
+      await page.setContent(`<html><body>${mr.svg}</body></html>`);
+      let worst = 0;
+      for (const t of [0, 0.4, 1, 1.5, 2.2, 2.7, 3.3, 4.8, 5.9]) {
+        const got = await page.evaluate(({ t, intro, loop }) => {
+          for (const an of document.getAnimations()) { an.pause(); an.currentTime = (intro + loop + t) * 1000; }
+          return [...document.querySelectorAll('g[style*="animation"]')].map((g) => { const mt = new DOMMatrix(getComputedStyle(g).transform); return [mt.e, mt.f]; });
+        }, { t, intro: mr.intro, loop: mr.loop });
+        for (const name of Object.keys(rest)) {
+          const v = probe.at(name, null, t), want = proj(v.x - rest[name][0], v.y - rest[name][1], v.z - rest[name][2]);
+          worst = Math.max(worst, Math.min(...got.map((g) => Math.hypot(g[0] - want[0], g[1] - want[1]))));
+        }
+      }
+      return { first, second, third, errors, worst };
+    });
+  } catch (e) { ran = null; console.log(`(browser checks skipped: ${String(e.message).split('\n')[0].slice(0, 120)})`); }
+  if (!ran) console.log('(no browser engine found: the interactive page and the checker-versus-browser comparison were not run)');
+  else {
+    ok('interactive page mounts with chapters and hotspots', ran.first.api && ran.first.dots === 3 && ran.first.hot === 2 && ran.errors.length === 0, JSON.stringify(ran.first) + ran.errors.join(' '));
+    ok('next chapter advances the stepper', ran.second.on === ran.first.on + 1, `${ran.first.on} -> ${ran.second.on}`);
+    ok('focusing an object opens its card', ran.third.card && /First actor/.test(ran.third.text), ran.third.text);
+    ok('the checker and the browser agree on where parts are', ran.worst < 0.05, `${ran.worst.toFixed(3)} px`);
+  }
+}
+
 // every example must be well-formed XML: used as <img>, an SVG is parsed strictly
 {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'iso-xml-'));
