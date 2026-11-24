@@ -138,7 +138,7 @@ The engine takes it from there:
 - **Detail.** Sockets where links start, trails behind moving tokens, bursts on state badges, motes of light around a glowing hero, blinking status lights, glare and live content on screens.
 - **Layout.** Connectors route along the floor grid and stop where an object's outline begins. Labels pick the side with room. The frame crops to the content.
 - **Motion.** A story of cause and effect compiles to CSS keyframes. Tokens pass correctly behind and in front of objects. Loops close exactly, so exported video and GIFs never jump.
-- **A checker.** Every build reports collisions, hidden links, overlapping labels, crowding and missing focus, each with the fix.
+- **A checker.** Every build reports collisions, hidden links, overlapping labels (and what they sit on), crowding, missing focus, a travelling subject too small to follow and stretches where nothing moves, each with the fix. `--layout` describes the picture in words, for a model that cannot look at it.
 - **Proof, not eyeballing.** Whether a current flows the right way or a caption arrives with the thing it describes is not something a layout checker can know. So the build can print what moves, when and which way in plain words; review sheets can show chosen moments close up with motion trails; and a scene can state facts about its own motion (`s.expect(3, at => at('electron').x < 0)`) that the build verifies with the same arithmetic the browser uses.
 
 ## Not limited to the kit
@@ -147,7 +147,10 @@ Fifty objects and ninety-five icons cover a lot, and the skill tells the agent t
 
 - **Any object.** `s.define` builds new objects from the same shapes the kit uses (blocks, cylinders, extrusions, cones, spheres, artwork on faces). The bakery scene above defines its own oven and loaf in twenty lines.
 - **Any mechanism.** Parts of an object can slide, lift, swing, orbit an axis and run keyframed sequences of their own, which is how the vignettes and the generator above are made. Streams of particles, vector arrows, ripples, gauges and changing readouts are ready-made.
-- **Any drawing.** `s.svg` stands arbitrary SVG artwork in the scene.
+- **Any drawing.** `s.svg` stands arbitrary SVG artwork in the scene, and a whole scene can be drawn by hand as flat artwork while the engine still supplies the clock, the captions, the checks and the export:
+
+<p align="center"><img src="gallery/water-cycle.svg" alt="A hand-drawn landscape: the sun warms the sea, wisps of vapour rise and gather into a cloud, the cloud turns grey and rains on the mountains, and a river carries the water back to the sea" width="560"></p>
+
 - **Real movement.** Objects slide, rise out of the floor, lift, appear and change state; tokens can be any object; the camera can move in on a detail and back out. Objects can also be translucent, or ghosted to stand for something planned or missing.
 - **Sets that match.** A series file holds the look, the image size and the custom objects for a whole course or product, so forty illustrations read as one work.
 - **Experiences.** `--experience step` produces an interactive page where a reader walks through the story one caption at a time; `scroll` ties it to the page scroll; objects answer a hover or tap with a detail card. Open [`gallery/request-lifecycle.experience.html`](gallery/request-lifecycle.experience.html) locally to try one.
@@ -172,7 +175,7 @@ Good illustration needs judgement that small models do not reliably have. The sk
 | `name.experience.html` | Optional interactive page: step-through, scroll-driven, hover details |
 | `name.html` | A preview with play, pause and scrub |
 | `name.sheet.png` · `name.looks.png` | Key frames of the loop, and the scene in several looks, for review |
-| `name.png` · `name.mp4` · `name.gif` · `name.webm` | Optional exports (need a Chrome-family browser; video needs ffmpeg) |
+| `name.png` · `name.mp4` · `name.gif` · `name.webm` | Optional exports. They need any Chrome, Chromium or Edge binary (no npm packages); video also needs ffmpeg. `--draft` makes a small, quick video for checking timing |
 
 A small transparent component for a feature card is the same thing with `background: false`:
 

@@ -162,6 +162,8 @@ export class Scene {
       res.w = res.w ?? Math.max(0.2, 2 * Math.max(Math.abs(bb.x0), Math.abs(bb.x1)));
       res.d = res.d ?? Math.max(0.2, 2 * Math.max(Math.abs(bb.y0), Math.abs(bb.y1)));
       res.h = res.h ?? Math.max(0.05, bb.z1);
+      // where the shapes really are, for the off-centre check: the footprint above is symmetric about the origin
+      if (res.measured === undefined && spec.custom) Object.defineProperty(res, 'measured', { value: bb, enumerable: false });
     }
     if (spec.custom && !res.shadow && !res.round) {
       // an L or T shaped object throws a shadow of that shape, not of its bounding box

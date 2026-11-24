@@ -66,7 +66,7 @@ export function animAt(a, t, T) {
 }
 
 /** Value of a story track at scene time t, eased as the browser eases it. */
-function trackAt(track, t) {
+export function trackAt(track, t) {
   if (!track) return null;
   let cur = track.initial;
   for (const s of track.segs) {
@@ -161,7 +161,11 @@ export function makeProbe(sc, T) {
       const a = e.item ? e.item.anim : e.part.anim;
       const who = `${e.ob.id} › ${e.label}`;
       if (e.part.t === 'stream' && !e.item) {
-        const p = e.part, P = snapPeriod(p.period ?? 4, T), a0 = p.pts[0], a1 = p.pts[p.pts.length - 1];
+        // the same period the compiler gives the stream: period, else the path's length over speed (cells a second), else 4 s
+        const p = e.part, a0 = p.pts[0], a1 = p.pts[p.pts.length - 1];
+        const line = p.closed ? [...p.pts, p.pts[0]] : p.pts;
+        const total = line.slice(1).reduce((sum, q, i) => sum + Math.hypot(q[0] - line[i][0], q[1] - line[i][1], (q[2] || 0) - (line[i][2] || 0)), 0);
+        const P = snapPeriod(p.period ?? (p.speed ? total / p.speed : 4), T);
         const way = p.closed ? `round a closed path, ${turnOf(p) === -1 ? 'against' : 'in'} the order its points are listed` : `${inPicture([a1[0] - a0[0], a1[1] - a0[1], (a1[2] || 0) - (a0[2] || 0)].map((v) => v * turnOf(p)))}`;
         lines.push(`  ${who}   particles, mode ${p.mode || 'drift'}: ${(p.mode || 'drift') === 'alternate' ? `rocking in place every ${n2(P)} s${p.wavelength ? `, the wave travelling ${way}` : ''}` : `travelling ${way}, ${n2(P)} s end to end`}`);
         if (!a) continue;
@@ -169,7 +173,7 @@ export function makeProbe(sc, T) {
       if (!a) continue;
       const P = periodOf(a, T);
       if (e.item && a.type === 'keys') {
-        lines.push(`  ${who}   artwork with a keyed sequence, every ${n2(P)} s: ${(a.keys || []).map((k) => `${n2(k.at * P)} s${k.rotate != null ? ` turn ${k.rotate}°` : ''}${k.opacity != null ? ` opacity ${k.opacity}` : ''}${k.scale != null ? ` scale ${k.scale}` : ''}${k.move ? ` move [${k.move.join(', ')}]` : ''}`).join(' → ')}`);
+        lines.push(`  ${who}   artwork with a keyed sequence, every ${n2(P)} s: ${(a.keys || []).map((k) => `${n2(k.at != null ? k.at * P : k.t ?? 0)} s${k.rotate != null ? ` turn ${k.rotate}°` : ''}${k.opacity != null ? ` opacity ${k.opacity}` : ''}${k.scale != null ? ` scale ${k.scale}` : ''}${k.move ? ` move [${k.move.join(', ')}]` : ''}`).join(' → ')}`);
         continue;
       }
       if (e.item || a.type === 'spin' || a.type === 'swing') {

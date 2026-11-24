@@ -396,6 +396,60 @@ throws('a builder must return parts', () => { const s = iso.scene({}); s.define(
   ok('a callout on another object is reported, one about its own object is not', notes.length === 1 && /Lands on the cube/.test(notes[0].msg), notes.map((n) => n.msg.slice(0, 50)).join('|'));
 }
 
+// report items say what they found and where; composition checks fire on the scenes they are for
+{
+  const { scene } = iso;
+  const wide = (label) => { const s = scene({ look: 'paper' }); s.add('cube', { at: [0, 0], label }); s.add('cube', { at: [14, 0] }); s.add('cube', { at: [0, 14] }); return s.build().notes.filter((n) => n.code === 'phone-text'); };
+  ok('phone-text is only for pictures with words, and gives the width to reach', !wide(null).length && wide('Cube').length === 1 && /840 px/.test(wide('Cube')[0].msg));
+
+  const lo = scene({ look: 'paper' });
+  lo.add('cube', { at: [0, 0], label: 'A rather long label', labelSide: 'below' });
+  lo.add('server', { at: [1.6, 1.6], id: 'rack' });
+  const hit = lo.build().notes.filter((n) => n.code === 'label-overlap');
+  ok('label-overlap names what the label sits on and the sides that are clear', hit.length === 1 && hit[0].level === 'warn' && /"rack"/.test(hit[0].msg) && /labelSide: 'above'/.test(hit[0].msg), hit.map((n) => n.msg).join('|'));
+
+  const trip = (scale) => {
+    const s = scene({ look: 'paper' });
+    const a = s.add('cube', { at: [0, 0] }), b = s.add('cube', { at: [12, 0], hero: true });
+    s.link(a, b);
+    s.story([s.send(a, b, { as: 'box', scale }), s.wait(1)]);
+    return s.build().notes.filter((n) => n.code === 'small-subject');
+  };
+  ok('a token too small to follow is reported, a readable one is not', trip(0.12).length === 1 && /box token/.test(trip(0.12)[0].msg) && trip(0.9).length === 0);
+
+  const stuck = (wait) => {
+    const s = scene({ look: 'paper' });
+    const a = s.add('cube', { at: [0, 0] }), b = s.add('cube', { at: [5, 0], hero: true });
+    s.link(a, b);
+    s.story([s.send(a, b, { as: 'doc' }), s.wait(wait), s.pulse(b), s.send(b, a, { as: 'doc' }), s.wait(1)]);
+    return s.build().notes.filter((n) => n.code === 'still');
+  };
+  ok('a long stretch with nothing moving is reported, a short pause is not', stuck(5).length === 1 && /Nothing moves from/.test(stuck(5)[0].msg) && stuck(1).length === 0);
+
+  const lopsided = (x) => { const s = scene({ look: 'sand', floor: 'plate' }); s.custom({ at: [0, 0], id: 'rig', parts: (sh) => [sh.box({ x, w: 1.5, d: 1, h: 1 }), sh.box({ x: x + 2, w: 1.5, d: 1, h: 0.6 })] }); return s.build().notes.filter((n) => n.code === 'off-centre'); };
+  ok('a custom object drawn far from its origin is reported with the shift that centres it', lopsided(3).length === 1 && /\[-4, 0\]/.test(lopsided(3)[0].msg) && lopsided(-1).length === 0, lopsided(3).map((n) => n.msg).join('|'));
+
+  // --motion: keys written in seconds, and a stream's speed
+  const m = scene({ look: 'paper', loop: 6 });
+  m.add('cube', { at: [0, 0] });
+  m.draw((sh) => [sh.stream({ points: [[2, 0, 0.1], [8, 0, 0.1]], speed: 2 })]);
+  m.custom({ at: [5, 3], parts: (sh) => [sh.decal({ plane: 'top', items: [{ t: 'circle', cx: 0, cy: 0, r: 0.3, fill: '#f00', anim: { type: 'keys', period: 6, keys: [{ t: 0, opacity: 1 }, { t: 3, opacity: 0 }, { t: 6, opacity: 1 }] } }] })] });
+  const parts = m.build().motion().parts.join('\n');
+  ok('--motion reads keys given in seconds', !/NaN/.test(parts) && /3 s opacity 0/.test(parts), parts);
+  ok('--motion times a stream by its speed', /3 s end to end/.test(parts), parts);
+
+  // the layout: what stands in front of what, and a token on its way
+  const ls = scene({ look: 'paper', title: 'Layout' });
+  const back = ls.add('cube', { at: [0, 0], id: 'back' }), apart = ls.add('cube', { at: [6, -3], id: 'apart' });
+  ls.add('building', { at: [1.3, 1.3], id: 'front' });
+  ls.link(apart, back);
+  ls.story([ls.send(apart, back, { as: 'box', scale: 0.8 }), ls.wait(1)]);
+  const lr = ls.build(), seen = Object.fromEntries(lr.layout.at(0.6).items.map((it) => [it.id, it]));
+  ok('the layout says what an object in front hides, and nothing hides the one in front', seen.back.hidden > 0.3 && seen.back.by[0] === 'front' && seen.front.hidden === 0 && seen.apart.hidden === 0, JSON.stringify(Object.values(seen).map((it) => [it.id, it.hidden, it.by])));
+  const tok = seen['the box token'];
+  ok('the layout places a token on its way between its ends', tok && tok.box.x0 > seen.back.box.x0 && tok.box.x1 < seen.apart.box.x1, JSON.stringify(tok && tok.box));
+}
+
 // in a real browser, when one is available: the interactive page, and the checker against what is drawn
 {
   const { withPage } = await import('../skills/concept-illustration/scripts/render.mjs');
