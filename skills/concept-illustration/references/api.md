@@ -15,6 +15,7 @@ Contents: [scene](#scene) · [looks](#looks) · [objects](#objects) · [custom o
 ## Coordinates
 
 - Units are grid cells. One cell is 40 units of the SVG's `viewBox`; a label is 14 units tall.
+- A world point `[x, y, z]` is drawn at `proj(x, y, z) = [(x − y) × 34.64, (x + y) × 20 − z × 40]`. `unproj(sx, sy, depth = 0)` gives the point drawn at a screen point, on the upright plane `x + y = depth`. Both arrive in the scene script with the rest of the API.
 - `+x` runs toward the lower-right of the picture, `+y` toward the lower-left, `z` is up.
 - The viewer looks from `(+x, +y, +z)`. Larger `x + y` is nearer the viewer and is drawn in front.
 - `at: [x, y]` is the centre of an object's footprint. `at: [x, y, z]` also lifts it.
@@ -164,8 +165,9 @@ const around = s.ring(5, { at: [0, 0], r: 4.6, start: -90 });          // degree
 | `dim` | | Draw the line fainter, for secondary links. Its label keeps full strength |
 | `color`, `width` | from the look | Overrides |
 | `z` | `0` | Height of the route above the floor |
+| `gap` | `0.16` | Space in cells between the link's end and the object |
 
-One link serves both directions: `s.send(b, a)` rides a link drawn with `s.link(a, b)`.
+One link serves both directions: `s.send(b, a)` rides a link drawn with `s.link(a, b)`. Links are drawn on the floor, under every object; something that must show in front of an object goes in `s.draw(…, { layer: 'sorted' })`.
 
 A link that meets an object on a far side stops where the object's outline begins, so its arrowhead stays visible.
 
@@ -272,12 +274,13 @@ node SKILL_DIR/scripts/build.mjs <file>.scene.mjs [options]
 | Option | Effect |
 | --- | --- |
 | `--out DIR` | Write outputs to DIR (default: next to the script) |
-| `--sheet` `--frames N` | Also write `<name>.sheet.png`: up to N frames (default 8) taken at the story's key moments; ask for more (`--frames 14`) when a quick event falls between them. `--frames 2.3,2.6` takes exactly those moments (seconds on the scene clock), shown large, and writes `<name>.frames.png` so the full sheet is kept |
+| `--sheet` `--frames N` | Also write `<name>.sheet.png`: up to N frames (default 8) taken at the story's key moments; ask for more (`--frames 14`) when a quick event falls between them. `--frames 2.3,2.6` takes exactly those moments (seconds on the scene clock), shown large, and writes `<name>.frames.png` so the full sheet is kept; one moment needs a decimal point (`--frames 4.0`) |
 | `--trails [SEC]` | On the sheet, lay a faint trail behind everything that moved in the last SEC seconds (default 0.3), so a still frame shows direction |
 | `--focus ID` `--focus x,y,z` `--zoom N` | Crop the sheet and PNG to one object (its id is printed by `--motion` and in errors) or around a point, optionally N times closer |
 | `--motion` | Print the story's timeline and every self-moving part: where it is at each key moment and which way it goes in the picture |
+| `--layout [SEC,SEC]` | Print every object, moving part and token at the sheet's moments (or those given): its box on the picture, its size, and how much of it is hidden and by what. See [checking](checking.md#reading-the-layout) |
 | `--png` `--at SEC` `--scale N` | Also write `<name>.png`. Without `--at` it shows the resting state |
-| `--mp4` `--gif` `--webm` | Also write a video of one loop. `--fps 30` `--width 1280` `--loops 1` `--intro` |
+| `--mp4` `--gif` `--webm` | Also write a video of one loop. `--fps 30` `--width 1280` `--loops 1` `--intro`. `--draft` makes a small, quick one (640 wide, 15 fps) as `<name>.draft.mp4` for checking timing |
 | `--look NAME` `--finish NAME` `--floor NAME` | Build with another look without editing the script |
 | `--looks [a,b,c]` | Also write `<name>.looks.png`: the scene in several looks side by side. Each entry is `palette`, `palette:finish` or `palette:finish:floor`. Without a list, six varied palettes |
 | `--experience [loop\|step\|scroll]` | Also write `<name>.experience.html`: an interactive page with controls, chapters and hover cards |
@@ -287,7 +290,7 @@ node SKILL_DIR/scripts/build.mjs <file>.scene.mjs [options]
 
 `node SKILL_DIR/scripts/render.mjs <file>.svg --png | --sheet | --mp4 | --gif | --webm` rasterises an SVG that is already built.
 
-Raster output uses Playwright or Puppeteer when the project has one, otherwise any Chrome, Chromium or Edge binary (set `CHROME_PATH` if it is not on `PATH`). Video needs ffmpeg.
+Raster output drives any Chrome, Chromium or Edge binary directly; no npm package is needed. It looks on `PATH`, in the usual install places and in the Playwright, Puppeteer and agent-browser caches; `CHROME_PATH` overrides. Playwright or Puppeteer is used only when no binary is found. Video needs ffmpeg. The first build of a scene prints a `Render setup:` line saying what it found.
 
 ## Using the engine from code
 
@@ -318,4 +321,4 @@ s.expect(1.5, (at) => Math.abs(at('needle').angle) < 5, 'the needle is centred w
 
 `at(ref, part)` returns `{ x, y, z, opacity, angle, level }` at that time (`level` is how much of an object stands above the floor, 0 to 1, for objects raised with `s.grow`): `x, y, z` in cells (the centre of the shape, or the origin of an object), `angle` in degrees for artwork that turns. `ref` is an object handle, an object id, or the `name` given to a shape, group or artwork item; pass an object and a name when two objects have parts with the same name. The build evaluates the same easing and timing the browser will, and lists any expectation that is false under FIX THESE, with the values it found. Tokens sent with `s.send` are not addressable.
 
-The report is produced from the scene's geometry and timing: objects that intersect, links that run under objects or kink, labels that collide, hidden objects never revealed, crowding, missing focal point, missing motion, extreme proportions and over-long loops, moving parts that pass through other shapes, text too small to read, unusually large files, and any `s.expect` that is false. [Checking](checking.md) lists them and gives the procedure. It does not judge whether the picture makes its point, and it does not inspect every frame of the animation. Use the sheet or the preview for that.
+The report is produced from the scene's geometry and timing: objects that intersect, links that run under objects or kink, labels that collide, hidden objects never revealed, crowding, missing focal point, missing motion, extreme proportions and over-long loops, moving parts that pass through other shapes, travellers too small to follow, long stretches with nothing moving, off-centre custom objects, text too small to read, unusually large files, and any `s.expect` that is false. [Checking](checking.md) lists them and gives the procedure. It does not judge whether the picture makes its point, and it does not inspect every frame of the animation. Use the sheet or the preview for that.

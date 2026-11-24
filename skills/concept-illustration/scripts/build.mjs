@@ -6,7 +6,8 @@
 //   node build.mjs my.scene.mjs --png --at 2.5  -> also my.png (still at 2.5s; omit --at for the resting state)
 //     review options: --frames 2.3,2.6 (those moments) · --trails (show direction of motion) · --focus <id | x,y,z> · --zoom 3
 //   node build.mjs my.scene.mjs --motion        -> print where every moving part is, and which way it goes
-//   node build.mjs my.scene.mjs --mp4 | --gif | --webm
+//   node build.mjs my.scene.mjs --layout [2,4.5] -> print where each thing is on screen, its size and what hides it
+//   node build.mjs my.scene.mjs --mp4 | --gif | --webm  (--draft: small and quick, written to my.draft.mp4)
 //   node build.mjs my.scene.mjs --looks          -> also my.looks.png (the scene in several looks)
 //   node build.mjs my.scene.mjs --experience step -> also my.experience.html (interactive)
 //   node build.mjs --list                       -> every object kind, icon, theme and token
@@ -82,7 +83,7 @@ async function main() {
   if (flag('list')) return list();
   const file = argv.find((a) => !a.startsWith('--') && /\.(mjs|js)$/.test(a));
   if (!file || flag('help')) {
-    console.log('Usage: node build.mjs <name>.scene.mjs [--out DIR] [--sheet] [--looks [a,b,c]] [--png [--at SEC]] [--mp4|--gif|--webm] [--look NAME] [--finish NAME] [--floor NAME] [--experience [loop|step|scroll]] [--no-html]\n       node build.mjs --list');
+    console.log('Usage: node build.mjs <name>.scene.mjs [--out DIR] [--sheet] [--looks [a,b,c]] [--png [--at SEC]] [--motion] [--layout [SEC,SEC]] [--mp4|--gif|--webm [--draft]] [--look NAME] [--finish NAME] [--floor NAME] [--experience [loop|step|scroll]] [--no-html]\n       node build.mjs --list');
     process.exit(file ? 0 : 1);
   }
   const abs = path.resolve(file);
@@ -103,6 +104,7 @@ async function main() {
   fs.mkdirSync(outDir, { recursive: true });
   const name = path.basename(abs).replace(/(\.scene)?\.(mjs|js)$/, '');
   const svgPath = path.join(outDir, `${name}.svg`);
+  const firstBuild = !fs.existsSync(svgPath);
   fs.writeFileSync(svgPath, r.svg);
   const made = [svgPath];
   if (!flag('no-html')) { const p = path.join(outDir, `${name}.html`); fs.writeFileSync(p, previewHtml(name, r)); made.push(p); }
@@ -141,6 +143,7 @@ async function main() {
   }
 
   const wantsRaster = ['png', 'sheet', 'mp4', 'gif', 'webm'].some(flag);
+  let videoNote = '', setupShown = false;
   if (wantsRaster) {
     const R = await import('./render.mjs');
     try {
@@ -149,22 +152,39 @@ async function main() {
       const focusArg = val('focus'), zoomArg = +val('zoom', 0) || null;
       const focus = focusArg ? (/^-?[\d.]+(,-?[\d.]+)+$/.test(focusArg) ? nums(focusArg) : focusArg) : null;
       const view = focus || zoomArg ? R.cropSvg(r.svg, { focus, zoom: zoomArg }) : r.svg;
-      // --frames 12 asks for that many frames; --frames 2.3,2.6 (or --at 2.3,2.6) asks for those moments
+      // --frames 12 asks for that many frames; --frames 2.3,2.6 or --frames 4.0 (a decimal point, or --at 2.3,2.6) asks for those moments
       const fr = val('frames', '8'), at = val('at');
-      const times = /,/.test(fr) ? nums(fr) : at && /,/.test(at) ? nums(at) : null;
+      const times = /[,.]/.test(fr) ? nums(fr) : at && /,/.test(at) ? nums(at) : null;
+      if (times && times.some((t) => !Number.isFinite(t))) throw new Error(`--frames ${fr}: give moments in seconds, such as --frames 2.3,2.6 (or a single moment with a decimal point: --frames 4.0).`);
+      if (!times && !(Number.isInteger(+fr) && +fr > 0)) throw new Error(`--frames ${fr}: give a number of frames (--frames 12) or moments in seconds (--frames 2.3,2.6).`);
       // the whole-loop sheet keeps its name; chosen moments and close-ups go to their own file beside it
       const sheetName = times || focus || zoomArg ? `${name}.frames.png` : `${name}.sheet.png`;
-      if (flag('sheet')) made.push(await R.renderSheet(view, path.join(outDir, sheetName), { frames: times ? times.length : +fr || 8, times, trails: flag('trails') ? +val('trails') || 0.3 : 0 }));
+      if (flag('sheet')) made.push(await R.renderSheet(view, path.join(outDir, sheetName), { frames: times ? times.length : +fr, times, trails: flag('trails') ? +val('trails') || 0.3 : 0 }));
       if (flag('png')) made.push(await R.renderPng(view, path.join(outDir, `${name}.png`), { at: at != null && !/,/.test(at) ? +at : null, scale: +val('scale', 2) }));
-      for (const f of ['mp4', 'gif', 'webm']) if (flag(f)) made.push(await R.renderVideo(r.svg, path.join(outDir, `${name}.${f}`), { format: f, fps: +val('fps', 30), width: +val('width', 1280), loops: +val('loops', 1), intro: flag('intro') }));
+      // --draft: a small, quick video to check timing, kept apart from the final one
+      const draft = flag('draft');
+      for (const f of ['mp4', 'gif', 'webm']) if (flag(f)) {
+        const t0 = Date.now();
+        made.push(await R.renderVideo(r.svg, path.join(outDir, `${name}${draft ? '.draft' : ''}.${f}`), { format: f, draft, fps: val('fps') ? +val('fps') : undefined, width: val('width') ? +val('width') : undefined, loops: +val('loops', 1), intro: flag('intro') }));
+        videoNote = `video: ${((Date.now() - t0) / 1000).toFixed(0)} s to render${draft ? ' (draft)' : ''}`;
+      }
     } catch (e) {
       console.log(`\n! Could not rasterise: ${e.message}`);
+      // when the machine is the problem, say what it has
+      if (/chrome|browser|ffmpeg|playwright|puppeteer/i.test(e.message)) {
+        setupShown = true;
+        const line = await R.setupLine();
+        if (!line.includes(e.message)) console.log(`  ${line}`);
+      }
     }
   }
 
   const rel = (p) => path.relative(process.cwd(), p) || p;
   console.log(`\n✓ ${name}: ${r.width}×${r.height}, ${r.objects} objects, ${r.loop.toFixed(1)}s loop, ${(r.bytes / 1024).toFixed(0)} KB`);
   for (const p of made) console.log(`  ${rel(p)}`);
+  if (videoNote) console.log(`  ${videoNote}`);
+  // the first build of a scene says what this machine can render, before a long render can fail
+  if (firstBuild && !setupShown) { try { console.log(`  ${await (await import('./render.mjs')).setupLine()}`); } catch { /* the SVG is what matters */ } }
   if (made.some((p) => p.endsWith('.svg'))) console.log(`  embed: <img src="${name}.svg" width="${r.width}" height="${r.height}" alt="…" style="max-width:100%;height:auto">${s.opts.size ? '' : '   (size: [w, h] in scene() keeps these numbers fixed between builds)'}`);
   const warns = r.notes.filter((n) => n.level === 'warn'), hints = r.notes.filter((n) => n.level === 'hint');
   if (warns.length) { console.log(`\nFIX THESE (${warns.length}):`); for (const n of warns) console.log(`  ✗ [${n.code}] ${n.msg}`); }
@@ -178,6 +198,32 @@ async function main() {
     if (m.parts.length) { console.log('\n  Parts that move by themselves'); for (const line of m.parts) console.log(`  ${line}`); }
     if (m.flows.length) { console.log('\n  Links with a flow'); for (const line of m.flows) console.log(`    ${line}`); }
     if (!m.timeline.length && !m.parts.length && !m.flows.length) console.log('  Nothing moves.');
+  }
+  if (flag('layout')) {
+    // the picture in words: where each thing is, how big, and what hides it, at the sheet's moments or chosen ones
+    const { sheetTimes } = await import('./render.mjs');
+    const asked = val('layout');
+    const times = asked ? asked.split(',').map(Number) : sheetTimes(r.svg, 8);
+    if (times.some((t) => !Number.isFinite(t))) throw new Error(`--layout ${asked}: give moments in seconds, such as --layout 2.3,4.5, or no value for the sheet's moments.`);
+    const L = r.layout, fr = L.frame, k = r.width / (fr.x1 - fr.x0), FW = fr.x1 - fr.x0, FH = fr.y1 - fr.y0;
+    const px = (v, o) => Math.round((v - o) * k), pc = (v) => `${Math.round(v * 100)} %`;
+    const chapters = JSON.parse(((r.svg.match(/data-chapters="([^"]+)"/) || [, '[]'])[1]).replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
+    console.log(`\nLAYOUT  (the picture is ${r.width}×${Math.round(FH * k)} px without the caption strip; x from its left edge, y from its top; size is the larger side as a share of the picture's width)`);
+    for (const t of times) {
+      const { items } = L.at(((t % r.loop) + r.loop) % r.loop);
+      const cap = chapters.filter((c) => c.t <= t + 1e-6).pop();
+      const shown = items.filter((it) => it.opacity >= 0.15), gone = items.filter((it) => it.opacity < 0.15 && it.kind === 'object');
+      console.log(`\n  at ${t.toFixed(2)} s${cap ? `   caption: "${cap.text}"` : ''}`);
+      for (const it of shown) {
+        const b = it.box, name = it.kind === 'object' && it.ob.label ? `${it.id} "${it.ob.label}"` : it.id;
+        const off = b.x1 < fr.x0 || b.x0 > fr.x1 || b.y1 < fr.y0 || b.y0 > fr.y1 ? '   OUT OF FRAME' : b.x0 < fr.x0 - 1 || b.x1 > fr.x1 + 1 || b.y0 < fr.y0 - 1 || b.y1 > fr.y1 + 1 ? '   cut by the frame edge' : '';
+        console.log(`    ${name.padEnd(30)} x ${px(b.x0, fr.x0)}–${px(b.x1, fr.x0)}  y ${px(b.y0, fr.y0)}–${px(b.y1, fr.y0)}  size ${pc(Math.max(b.x1 - b.x0, b.y1 - b.y0) / FW)}${it.opacity < 0.95 ? `  opacity ${it.opacity.toFixed(2)}` : ''}${it.hidden > 0.05 ? `  ${pc(it.hidden)} hidden behind ${it.by.slice(0, 3).join(', ')}` : ''}${off}`);
+      }
+      if (gone.length) console.log(`    not shown: ${gone.map((it) => it.id).join(', ')}`);
+      const f = L.fill(((t % r.loop) + r.loop) % r.loop);
+      if (Number.isFinite(f.span.x0)) console.log(`    the drawing spans x ${pc((f.span.x0 - fr.x0) / FW)}–${pc((f.span.x1 - fr.x0) / FW)}, y ${pc((f.span.y0 - fr.y0) / FH)}–${pc((f.span.y1 - fr.y0) / FH)} of the picture, and its shapes cover ${pc(f.share)} of it`);
+    }
+    if (L.continuous) console.log('\n  Flows, particles, floating and artwork that turns or blinks move as well; they are not listed.');
   }
   if (!wantsRaster) console.log('\nNext: look at the result. Add --sheet to get frames across the loop as one PNG.');
   if (flag('strict') && warns.length) process.exit(2);

@@ -6,12 +6,13 @@ import {
 } from './geom.mjs';
 import { material } from './themes.mjs';
 import { KIT, PACKETS } from './kit.mjs';
-import { renderPrim, primBox, renderPrism, sweepBox } from './prims.mjs';
+import { renderPrim, primBox, renderPrism, sweepBoxes } from './prims.mjs';
 import { buildPath, pointAt, reversePath } from './links.mjs';
 import { Track, keyframes, snapPeriod, schedule, EASE, EASE_FN } from './motion.mjs';
 import { rgba, mix } from './color.mjs';
 import { ICONS } from './icons.mjs';
 import { makeProbe, findCollisions, normKeys } from './probe.mjs';
+import { makeLayout } from './layout.mjs';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
@@ -736,7 +737,7 @@ export function compile(sc) {
     grow({ x0: sb.x0, x1: sb.x1, y0: sb.y0 - liftPx - (ob.float ? 8 : 0), y1: sb.y1 });
     if (ob.tracks.move) for (const sg of ob.tracks.move.segs) grow({ x0: sb.x0 + sg.to[0], x1: sb.x1 + sg.to[0], y0: sb.y0 + sg.to[1], y1: sb.y1 + sg.to[1] });
     // the frame must hold the object over its whole motion, not only at rest
-    if (ob.animated) for (const part of ob.parts) { const sw = sweepBox(part); if (sw) grow(growBox(aabbScreen(aabbShift(sw, [ob.x, ob.y, ob.z])), 4)); }
+    if (ob.animated) for (const part of ob.parts) for (const sw of sweepBoxes(part)) grow(growBox(aabbScreen(aabbShift(sw, [ob.x, ob.y, ob.z])), 4));
   }
 
   // --- story tokens: one copy per straight run of the route, so each sorts correctly among the objects
@@ -758,6 +759,7 @@ export function compile(sc) {
     const partsSvg = renderParts(pk.parts);
     let local = null;
     for (const p of pk.parts) local = aabbUnion(local, primBox(p));
+    mv.local = local;
     const { path } = mv;
     const dur = mv.t1 - mv.t0;
     const E = EASE_FN[mv.ease] || EASE_FN.inOut;
@@ -811,7 +813,7 @@ export function compile(sc) {
       const vis = windowCss(mv.t0 + ua * dur, endOf(si, mv.t0 + ub * dur), si === 0, si === segs.length - 1);
       const on = staticF >= sg.fa && staticF < sg.fb;
       const svg = `<g transform="translate(${r1(staticPos[0])} ${r1(staticPos[1])})" opacity="${on ? 1 : 0}" style="${join(storyStyle(moveCss), storyStyle(vis))}">${body}</g>`;
-      if (path.arc) air += svg; else world.push({ aabb: sg.box, svg, bias: 0.05 });
+      if (path.arc) air += svg; else world.push({ aabb: sg.box, svg, bias: 0.05, token: { mv, fa: sg.fa, fb: sg.fb } });
     });
     if (rich && !isKind && path.d && !mv.stay) {
       let Lp = 0;
@@ -869,7 +871,7 @@ export function compile(sc) {
     const box = left ? { x0: tx - w - 4, x1: tx + 2, y0: ty - 14, y1: ty + 18 } : { x0: tx - 2, x1: tx + w + 4, y0: ty - 14, y1: ty + 18 };
     grow(box);
     grow({ x0: ax - 4, x1: ax + 4, y0: ay - 4, y1: ay + 4 });
-    labelBoxes.push(box);
+    labelBoxes.push({ ...box, what: `the callout "${c.text}"` });
     calloutBoxes.push({ text: c.text, box, ax, ay, timed: c.from != null || c.until != null });
     return svg;
   };
@@ -896,7 +898,7 @@ export function compile(sc) {
     const fl = lk.path.flat;
     for (let i = 1; i < fl.length; i++) {
       const a = projP(fl[i - 1].p), b = projP(fl[i].p), n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 8));
-      for (let k = 0; k <= n; k++) linkDots.push([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n]);
+      for (let k = 0; k <= n; k++) linkDots.push([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n, lk]);
     }
   }
   for (const ob of sc.objs) {
@@ -921,12 +923,24 @@ export function compile(sc) {
       if (side === 'left') return { x: sb.x0 - 10, y: (sb.y0 + sb.y1) / 2 - h / 2, anchor: 'end', box: { x0: sb.x0 - 10 - w, x1: sb.x0 - 10, y0: (sb.y0 + sb.y1) / 2 - h / 2, y1: (sb.y0 + sb.y1) / 2 + h / 2 } };
       return { x: cx, y: sb.y1 + 9, anchor: 'middle', box: { x0: cx - w / 2, x1: cx + w / 2, y0: sb.y1 + 9, y1: sb.y1 + 9 + h } };
     };
-    const onLink = (b) => linkDots.some((q) => q[0] > b.x0 + 2 && q[0] < b.x1 - 2 && q[1] > b.y0 + 2 && q[1] < b.y1 - 2);
-    const clash = (b) => labelBoxes.some((l) => boxesOverlap(l, b, 1)) || solid.some((sld) => sld.ob !== ob && sld.ob !== ob.parent && sld.ob.parent !== ob && boxesOverlap(sld.box, b, 2)) || onLink(b);
-    const order = ob.labelSide ? [ob.labelSide] : ['below', 'above', 'right', 'left'];
-    let pos = place(order[0]);
-    for (const side of order) { const p = place(side); if (!clash(p.box)) { pos = p; break; } }
-    if (clash(pos.box)) note(onLink(pos.box) && !labelBoxes.some((l) => boxesOverlap(l, pos.box, 1)) ? 'hint' : 'warn', 'label-overlap', `The label "${ob.label || ob.sub}" overlaps another label, an object or a link. Give "${ob.id}" more room, shorten the text, or set labelSide: 'above' | 'below' | 'left' | 'right'.`);
+    // what a label would sit on at each side: other labels and objects (a defect), or only links (readable, so a hint)
+    const sides = ['below', 'above', 'right', 'left'].map((side) => {
+      const p = place(side), b = p.box;
+      const hard = [...labelBoxes.filter((l) => boxesOverlap(l, b, 1)).map((l) => l.what || 'another label'),
+        ...solid.filter((sld) => sld.ob !== ob && sld.ob !== ob.parent && sld.ob.parent !== ob && boxesOverlap(sld.box, b, 2)).map((sld) => `"${sld.ob.id}"`)];
+      const links = [...new Set(linkDots.filter((q) => q[0] > b.x0 + 2 && q[0] < b.x1 - 2 && q[1] > b.y0 + 2 && q[1] < b.y1 - 2).map((q) => q[2]))];
+      return { side, p, hard: [...new Set(hard)], links, clear: !hard.length && !links.length };
+    });
+    const allowed = (ob.labelSide ? [ob.labelSide] : ['below', 'above', 'right', 'left']).map((sd) => sides.find((x) => x.side === sd));
+    let pick = allowed.find((x) => x.clear);
+    if (!pick) {
+      pick = allowed.find((x) => !x.hard.length) || allowed[0];
+      const free = sides.filter((x) => x.clear).map((x) => `labelSide: '${x.side}'`);
+      const hits = [...pick.hard, ...pick.links.map((lk) => `the link ${nameOf(lk.a)} → ${nameOf(lk.b)}`)];
+      note(pick.hard.length ? 'warn' : 'hint', 'label-overlap', `The label "${ob.label || ob.sub}" of "${ob.id}" (placed ${pick.side}) ${pick.hard.length ? 'sits on' : 'crosses'} ${hits.slice(0, 3).join(' and ')}${hits.length > 3 ? ` and ${hits.length - 3} more` : ''}. ${free.length ? `Clear: ${free.join(' or ')}.` : `No side is clear: move "${ob.id}" or its neighbours a cell apart, or shorten the text.`}${pick.hard.length ? '' : ' Crossing only a link leaves the label readable, so this is a hint; on an object or a label it is a defect.'}`);
+    }
+    const pos = pick.p;
+    pos.box.what = `the label of "${ob.id}"`;
     labelBoxes.push(pos.box);
     let y = pos.y, svg = '';
     for (const l of lines) {
@@ -969,7 +983,7 @@ export function compile(sc) {
       if (score === 0) break;
     }
     floor += `<g transform="${planeMatrix('top', best.o, best.turn)}"><text x="0" y="0" font-size="${sz}" font-family="${esc(th.font)}" font-weight="700" letter-spacing="0.04" fill="${th.text.muted}">${esc(zn.label)}</text></g>`;
-    labelBoxes.push(best.box);
+    labelBoxes.push({ ...best.box, what: `the zone label "${zn.label}"` });
     grow(best.box);
   }
 
@@ -1044,10 +1058,6 @@ export function compile(sc) {
     const worst = smallText.reduce((a, b) => (b.px < a.px ? b : a));
     note('hint', 'text-small', `Text drawn on a face is too small to read: "${worst.text.slice(0, 20)}" is ${r1(worst.px)} px high${smallText.length > 1 ? ` (and ${smallText.length - 1} more)` : ''}. Use size 0.24 or more (0.3 reads well), or say it with a label, a callout or a caption instead.`);
   }
-  {
-    const wide = vb.x1 - vb.x0, onPhone = (14 * 360) / wide;
-    if (onPhone < 6) note('hint', 'phone-text', `This picture is ${Math.round(wide)} px wide, so on a phone (360 px) its labels shrink to about ${r1(onPhone)} px. If it will be read on phones, fold the layout into two lanes or an L so it is narrower, or build a second, simpler version for small screens.`);
-  }
   const W = vb.x1 - vb.x0, H = vb.y1 - vb.y0;
   const outW = o.size ? Math.round(o.size[0]) : W, outH = o.size ? Math.round(o.size[1]) : H;
   const mx = (bounds.x0 + bounds.x1) / 2, my = (bounds.y0 + bounds.y1) / 2;
@@ -1113,6 +1123,17 @@ export function compile(sc) {
   if (W / H > 2.7) note('hint', 'aspect', `The picture is very wide (${Math.round(W)}×${Math.round(H)}). Spread objects along y as well as x, or it will look thin where it is embedded.`);
   if (W / H < 0.72) note('hint', 'aspect', `The picture is very tall (${Math.round(W)}×${Math.round(H)}). Spread objects along x as well as y.`);
   for (const ob of sc.objs) if (ob.hidden && !ob.tracks.opacity) note('warn', 'never-shown', `"${ob.id}" is hidden: true but the story never reveals it. Add s.pop(${ob.id}) or s.show(${ob.id}) to the story.`);
+  // a custom object's footprint is symmetric about its origin; shapes drawn off to one side make it far bigger than they are
+  for (const ob of sc.objs) {
+    const m = ob.res.measured;
+    if (!m || ob.free || ob.parent || ob.res.w == null) continue;
+    // it matters only where the footprint is drawn: a plate, a link's end, a shadow the size of the footprint
+    const uses = [th.floor.plate && o.floor !== false && 'the plate floor', sc.links.some((lk) => lk.a.obj === ob || lk.b.obj === ob) && 'its links',
+      o.shadows && th.shadow.kind !== 'none' && ob.opts.shadow !== false && !(ob.res.shadow && (ob.res.shadow.rects || ob.res.shadow.w != null)) && 'its shadow'].filter(Boolean);
+    if (!uses.length) continue;
+    const k = ob.k, cx = ((m.x0 + m.x1) / 2) * k, cy = ((m.y0 + m.y1) / 2) * k, aw = (m.x1 - m.x0) * k, ad = (m.y1 - m.y0) * k;
+    if ((Math.abs(cx) > 0.75 || Math.abs(cy) > 0.75) && ob.w * ob.d > 1.5 * Math.max(0.04, aw * ad)) note('hint', 'off-centre', `The shapes of "${ob.id}" are centred ${r1(cx)}, ${r1(cy)} cells from its origin. Its footprint is measured symmetrically about the origin, so it counts as ${r1(ob.w)}×${r1(ob.d)} cells though its shapes cover ${r1(aw)}×${r1(ad)}; ${uses.join(' and ')} ${uses.length > 1 ? 'use' : 'uses'} the larger size and ${uses.length > 1 ? 'spread' : 'spreads'} past the object. Draw its shapes round the origin (shift them by [${r1(-cx / k)}, ${r1(-cy / k)}] inside the builder and move at by [${r1(cx)}, ${r1(cy)}]), or return w and d.`);
+  }
   const labelled = sc.objs.filter((ob) => ob.label).length;
   if (vis.length >= 3 && labelled === 0 && !captions.length && !sc.callouts.length) note('hint', 'no-labels', 'No labels or captions: viewers may not know what the objects stand for. Label the key objects.');
 
@@ -1147,7 +1168,7 @@ export function compile(sc) {
   }
   const fadeIn = (delay, dur = 0.5) => (o.intro ? `animation:${kf('from{opacity:0}to{opacity:1}')} ${dur}s ease-out ${r2(delay)}s both` : '');
   // the camera: one transform over everything in the scene, leaving backdrop, heading and captions where they are
-  let cameraOpen = '';
+  let cameraOpen = '', camTrack = null;
   if (cameraSteps.length) {
     const cxm = vb.x0 + W / 2, cym = vb.y0 + (H - (captions.length ? 46 : 0)) / 2;
     const cam = new Track('camera', [0, 0, 1]);
@@ -1156,6 +1177,7 @@ export function compile(sc) {
       cam.to(c.t0, c.t1, f ? [cxm - c.k * f[0], cym - c.k * f[1], c.k] : [0, 0, 1], c.ease);
     }
     cam.close(T);
+    camTrack = cam;
     // the zoomed scene stays out of the strip the captions are written in
     const strip = captions.length ? 46 : 0;
     const clip = strip ? def('camclip', (id) => `<clipPath id="${id}"><rect x="${vb.x0}" y="${vb.y0}" width="${W}" height="${H - strip}"/></clipPath>`) : null;
@@ -1188,6 +1210,11 @@ export function compile(sc) {
     '</svg>',
   ];
   const svg = pieces.join('');
+  {
+    // a picture without words loses nothing on a small screen; one with labels needs them at 6 px or more on a 360 px phone
+    const onPhone = (14 * 360) / W;
+    if (onPhone < 6 && svg.includes('<text')) note('hint', 'phone-text', `This picture is ${Math.round(W)} px wide, so on a 360 px phone its 14 px labels shrink to about ${r1(onPhone)} px; they need it to be 840 px wide or less. If it will be read on phones, fold the layout into two lanes, an L or a U so it is narrower, or build a second, simpler version for small screens. Shrinking the objects with scale does not fix it well: the words stay the same size and crowd the smaller drawing. If it will not be read on phones, leave it.`);
+  }
   if (svg.length > 150 * 1024) {
     // say what the size is made of, so the cure is obvious
     const kfBytes = css.length, kfCount = (css.match(/@keyframes/g) || []).length;
@@ -1195,5 +1222,19 @@ export function compile(sc) {
     note('hint', 'large', `The SVG is ${Math.round(svg.length / 1024)} KB; most scenes are 30 to 80. ${Math.round(kfBytes / 1024)} KB of it is ${kfCount} sets of keyframes${heavy.length ? `, and the heaviest objects are ${heavy.map((w) => `${w.id} (${Math.round(w.kb)} KB)`).join(' and ')}` : ''}. Many separately keyed dots are the usual cause: sh.stream, or flow on a link, moves any number of particles with a handful of shared keyframes.`);
   }
 
-  return { svg, width: outW, height: outH, loop: T, intro: introEnd, notes, objects: sc.objs.length, bytes: svg.length, motion: () => ({ timeline, parts: probe.report(), flows }) };
+  const layout = makeLayout({ sc, T, probe, movers, camera: camTrack, vb, strip: captions.length ? 46 : 0, rank: new Map(worldOrder.map((w, i) => [w.token || w.ob, i])), labels: labelBoxes });
+  if (sc.objs.length) {
+    // composition: what the eye follows must be big enough to follow, and the picture must not stand still for long
+    const { small, stills, fw } = layout.survey();
+    if (small.length) {
+      const [a, b] = small, pct = (e) => r1((e.size / fw) * 100);
+      note('hint', 'small-subject', `"${a.id}" carries the story across the picture but is only ${pct(a)} % of the picture's width (about ${Math.round((a.size / fw) * 800)} px when the picture is shown 800 px wide), so the eye loses it${b ? `; so is "${b.id}" (${pct(b)} %)` : ''}. Things that travel read at 4 % or more. Make it bigger: scale on the object or shape, or for a token s.send(a, b, { as, scale: 0.8 }). Or bring the camera to it with s.zoom while it travels.`);
+    }
+    if (!layout.continuous && hasMotion) {
+      const mid = stills.find(([a, b]) => b - a > 3 && b < T - 0.7), end = stills.find(([a, b]) => b >= T - 0.7 && b - a > 4);
+      if (mid) note('hint', 'still', `Nothing moves from ${r1(mid[0])} s to ${r1(mid[1])} s, so for ${r1(mid[1] - mid[0])} s the picture looks stuck. Shorten the wait there, or give that stretch something to do: a flow on a link, a part that keeps working.`);
+      else if (end) note('hint', 'still', `The end is held still for ${r1(end[1] - end[0])} s before the loop restarts; 1 to 2 s is enough. Shorten the last s.wait, or the loop.`);
+    }
+  }
+  return { svg, width: outW, height: outH, loop: T, intro: introEnd, notes, objects: sc.objs.length, bytes: svg.length, motion: () => ({ timeline, parts: probe.report(), flows }), layout };
 }

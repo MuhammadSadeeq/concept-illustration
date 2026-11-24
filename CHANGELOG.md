@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.2.0 — 2026-11-24
+
+Prompted by nine runs of one brief each on nine different models. Most of their time went on browser setup and video export, and on problems the checker did not report.
+
+### Changed (may affect scenes you already have)
+
+- PNG, sheet and video export drive any Chrome, Chromium or Edge binary directly over its DevTools pipe. Playwright and Puppeteer are no longer needed and are used only when no binary is found. The browser is also looked for in the Playwright, Puppeteer and agent-browser caches.
+- Video frames go straight from the browser into ffmpeg, about three times faster than before (a 1920 × 2034, 10 s loop: 87 s, was about 4.5 minutes through Playwright).
+- Moving parts are framed by each place they visit, not by one box round all of them. A few scenes whose parts move both across and up lose some empty space at the top.
+- `phone-text` is reported only for pictures that have words in them, and says the width to reach (840 px).
+- `label-overlap` names what the label sits on (an object, a label, a callout, a zone label or a link) and lists the sides that are clear. It is a defect on an object or a label and a hint on a link alone, and now says so.
+
+### Added
+
+- `--draft` with `--mp4`, `--gif` or `--webm`: a small, quick video (640 wide, 15 fps) written beside the final one as `<name>.draft.mp4`. The build prints how long each video took.
+- A `Render setup:` line on the first build of a scene, naming the browser and ffmpeg it found, and after any render failure caused by the machine.
+- `--layout [SEC,SEC]`: the picture in words. At the sheet's moments, or chosen ones, it lists every object, moving part and token with its box on the picture, its size and how much of it is hidden and by what, for models that cannot view images.
+- Checks: `small-subject` (a traveller too small to follow), `still` (more than 3 s with nothing moving, or a long held end) and `off-centre` (a custom object drawn far from its origin, whose plate, links and shadow then come out too big).
+- `proj` and `unproj` are passed to scene scripts. `unproj` turns screen pixels into cells, for placing and moving hand-drawn artwork.
+- Hand-drawn scenes: a section in `references/custom.md` and the `water-cycle` example, a whole scene drawn as flat SVG and run by the engine.
+- SKILL.md states the cell size and projection, how the frame and a custom footprint are sized, that links are drawn under objects, the link `gap`, and to build early and export video once, at the end.
+
+### Fixed
+
+- The renderer passed `--force-prefers-reduced-motion=0`, which recent Chrome reads as turning reduced motion on, so sheets and videos froze on one frame. Renders now ask for motion explicitly and stop with a message if the page still has no animation.
+- `--frames 11.2` crashed, and `--frames 4` meant four frames where one moment was wanted. A single moment is written with a decimal point (`--frames 4.0`); anything else gets an error that says what to write.
+- `--motion` printed `NaN s` for artwork keys written with `t:`, and timed a stream given `speed` as 4 s.
+
 ## 1.1.0 — 2026-11-23
 
 Prompted by a review of 49 animations made with the skill, and by further rounds of testing with a small model.
