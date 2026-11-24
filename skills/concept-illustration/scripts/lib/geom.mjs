@@ -23,6 +23,14 @@ export const r1 = (n) => {
 /** Project a world point to screen units. */
 export const proj = (x, y, z = 0) => [(x - y) * COS * UNIT, (x + y) * SIN * UNIT - z * UNIT];
 export const projP = (p) => proj(p[0], p[1], p[2] || 0);
+/**
+ * The world point that is drawn at screen point (sx, sy): the inverse of proj, on the upright plane x + y = depth
+ * (larger depth is nearer the viewer). With depth 0 it is linear, so it also turns a screen offset into a move.
+ */
+export const unproj = (sx, sy, depth = 0) => {
+  const a = sx / (2 * COS * UNIT);
+  return [depth / 2 + a, depth / 2 - a, (depth * SIN * UNIT - sy) / UNIT];
+};
 
 export const add3 = (a, b) => [a[0] + b[0], a[1] + b[1], (a[2] || 0) + (b[2] || 0)];
 export const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], (a[2] || 0) - (b[2] || 0)];

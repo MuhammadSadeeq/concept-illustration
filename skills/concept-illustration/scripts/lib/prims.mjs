@@ -456,9 +456,14 @@ const reach = (items) => {
 };
 
 /** The box a shape occupies over its whole motion, not only at rest: used to frame the picture. */
-export function sweepBox(p) {
-  if (!p) return null;
-  let b = p.t === 'group' ? p.parts.filter(Boolean).reduce((acc, c) => boxUnion(acc, sweepBox(c)), null) : primBox(p);
+/**
+ * Every box a shape occupies as it moves: at rest and at each place its keys or move take it (a disc for artwork
+ * that turns, a ring for an orbit). The frame takes in each one on screen; one box round them all would also take in
+ * corners the shape never visits, which for a move that is both across and up adds empty space above the picture.
+ */
+export function sweepBoxes(p) {
+  if (!p) return [];
+  let boxes = p.t === 'group' ? p.parts.filter(Boolean).flatMap(sweepBoxes) : [primBox(p)];
   if (p.t === 'decal') {
     // artwork that spins or swings sweeps a disc in its plane
     const P = PLANES[p.plane || 'top'], o = p.o || [0, 0, 0];
@@ -466,20 +471,20 @@ export function sweepBox(p) {
       if (!it || it.t !== 'g' || !it.anim || !['spin', 'swing', 'keys'].includes(it.anim.type)) continue;
       const R = reach(it.items) * (it.scale || 1), c = add3(add3(o, mul3(P.U, it.tx || 0)), mul3(P.V, it.ty || 0));
       const ext = [0, 1, 2].map((i) => R * Math.max(Math.abs(P.U[i]), Math.abs(P.V[i])));
-      b = boxUnion(b, aabb(c[0] - ext[0], c[1] - ext[1], c[2] - ext[2], c[0] + ext[0], c[1] + ext[1], c[2] + ext[2]));
+      boxes.push(aabb(c[0] - ext[0], c[1] - ext[1], c[2] - ext[2], c[0] + ext[0], c[1] + ext[1], c[2] + ext[2]));
     }
   }
   const a = p.anim;
-  if (a && b) {
-    const rest = b;
+  if (a && boxes.length) {
+    const rest = boxes;
     const moves = a.type === 'move' ? [a.by || [0, 0, 0.5]] : a.type === 'keys' ? (a.keys || []).map((k) => k.move).filter(Boolean) : [];
-    for (const m of moves) b = boxUnion(b, aabb(rest.x0 + (m[0] || 0), rest.y0 + (m[1] || 0), rest.z0 + (m[2] || 0), rest.x1 + (m[0] || 0), rest.y1 + (m[1] || 0), rest.z1 + (m[2] || 0)));
+    for (const m of moves) boxes = boxes.concat(rest.map((b) => aabb(b.x0 + (m[0] || 0), b.y0 + (m[1] || 0), b.z0 + (m[2] || 0), b.x1 + (m[0] || 0), b.y1 + (m[1] || 0), b.z1 + (m[2] || 0))));
     if (a.type === 'orbit') {
       const r = a.r ?? 0.5, ax = a.axis || { right: 'x', left: 'y', top: 'z' }[a.plane] || 'x';
-      b = aabb(rest.x0 - (ax === 'x' ? 0 : r), rest.y0 - (ax === 'y' ? 0 : r), rest.z0 - (ax === 'z' ? 0 : r), rest.x1 + (ax === 'x' ? 0 : r), rest.y1 + (ax === 'y' ? 0 : r), rest.z1 + (ax === 'z' ? 0 : r));
+      boxes = rest.map((b) => aabb(b.x0 - (ax === 'x' ? 0 : r), b.y0 - (ax === 'y' ? 0 : r), b.z0 - (ax === 'z' ? 0 : r), b.x1 + (ax === 'x' ? 0 : r), b.y1 + (ax === 'y' ? 0 : r), b.z1 + (ax === 'z' ? 0 : r)));
     }
   }
-  return b;
+  return boxes;
 }
 
 export function renderPrim(ctx, p) {

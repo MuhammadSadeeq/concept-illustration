@@ -3,8 +3,8 @@ name: concept-illustration
 description: Create richly detailed isometric 3D illustrations, motion graphics and interactive scenes that make an idea visible - animated explainers, diagrams of how something works, hero visuals, step-through and scroll-driven experiences, and small animated components for pages, docs, READMEs, slides and video. Output is a self-contained animated SVG (plus optional interactive page, PNG, GIF, MP4). Use whenever the user asks to illustrate, visualize, diagram, animate or explain a concept, process, system, architecture, workflow, data flow or product feature, or asks for an isometric, 3D-style or motion graphic.
 license: MIT
 metadata:
-  version: "1.1.0"
-compatibility: Requires Node.js 18 or newer to run the bundled engine. No packages to install. PNG and video export additionally use Playwright, Puppeteer or any Chrome binary, and ffmpeg for video.
+  version: "1.2.0"
+compatibility: Requires Node.js 18 or newer to run the bundled engine. No packages to install. PNG and video export use any Chrome, Chromium or Edge binary, and ffmpeg for video.
 ---
 
 # Concept Illustration
@@ -56,9 +56,11 @@ export default ({ scene }) => {
 node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --sheet
 ```
 
-This writes `<name>.svg` (the deliverable), `<name>.html` (a preview with a scrubber) and `<name>.sheet.png` (key frames of the loop) next to the script, or into `--out DIR`, then prints a report.
+This writes `<name>.svg` (the deliverable), `<name>.html` (a preview with a scrubber) and `<name>.sheet.png` (key frames of the loop) next to the script, or into `--out DIR`, then prints a report. The first build also prints a `Render setup:` line naming the browser and ffmpeg it found; if it finds none, set `CHROME_PATH` to any Chrome, Chromium or Edge before you need a sheet or a video.
 
-3. Read the report. Fix everything under **FIX THESE**, weigh everything under **CONSIDER**, and rebuild. A clean report ends with `No problems found by the checker.` Then look at the sheet if you can view images: the checker verifies layout, not whether the picture is good.
+3. Read the report. Fix everything under **FIX THESE**, weigh everything under **CONSIDER**, and rebuild. A clean report ends with `No problems found by the checker.` Then look at the sheet if you can view images: the checker verifies layout, not whether the picture is good. If you cannot view images, read `--layout` instead (step 9).
+
+Build early: write a first scene from this file alone and build it within your first few steps, then open a reference when the report or the brief calls for it. Each reference says when it is needed.
 
 Do not `import` the engine in the scene script; the build passes it in. Always `return s`.
 
@@ -155,6 +157,8 @@ The accent colour belongs to the hero. Where a supporting object shows a lot of 
 ```
 
 - `at: [x, y]` is the centre of an object, in grid cells. A row along `x` runs from the upper-left of the picture to the lower-right, the way people read. Use `y` for parallel lanes.
+- One cell is 40 px at natural size: a point is drawn at `proj(x, y, z) = [(x − y) × 34.64, (x + y) × 20 − z × 40]`. The scene script receives `proj` and its inverse `unproj` with the rest of the API.
+- The frame is everything drawn plus `pad` (56 px). A custom object's footprint, which its links, its shadow and a `plate` floor use, is measured symmetrically about its origin, so centre an object's shapes on its origin.
 - **Turning.** +x round to +y is *clockwise* seen from above, the opposite of a maths textbook. Never work out a direction of rotation from the axes: write `sense: 'cw'` or `'ccw'` (as the turn appears in the picture) and confirm it with `--motion`.
 - Centres **4 to 5 cells apart**; under 3 they collide. Linked objects share an `x` or a `y` so links run straight.
 - More than four in one row makes a long thin picture. Turn the row into an L or a U, or use two lanes, so the frame stays near 4:3 or 16:9.
@@ -176,7 +180,9 @@ s.link(a, b, { arc: true })                   // a hop through the air
 s.link(a, b, { label: 'HTTPS', dim: true })   // small caption; dim fades a secondary link
 ```
 
-Draw only links that carry meaning. One link serves both directions. Ends may be points `[x, y]`. For a wire or pipe, where the arrowhead would claim a direction, use `arrow: false`.
+Draw only links that carry meaning. One link serves both directions. Ends may be points `[x, y]`. For a wire or pipe, where the arrowhead would claim a direction, use `arrow: false`. `gap` (default 0.16 cells) is the space left between a link's end and the object.
+
+Links lie on the floor and are drawn under every object. A connection that must show in front of an object, such as a duct entering a wall, is shapes in `s.draw((sh) => [...], { layer: 'sorted' })`, not a link.
 
 **Things that are not objects** (arrows, guides, field lines, particles in the air) are drawn with `s.draw`. They take up no room: nothing avoids them and they are never reported as overlapping, so they can run round and between the objects.
 
@@ -229,16 +235,18 @@ The engine adds these by itself: a contact shadow and a cast shadow per object, 
 node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --sheet                  # SVG + preview + key frames + report
 node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --looks                  # the scene in six looks, to compare
 node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --experience step        # interactive page: 'loop' | 'step' | 'scroll'
-node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --png --at 3             # one still; also --mp4 --gif --webm
+node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --png --at 3             # one still
 node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --motion                 # print what moves, when and which way
+node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --layout                 # print where each thing is on screen, how big, and what hides it
+node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --mp4 --draft            # a small, quick video to check timing (<name>.draft.mp4); also --gif --webm
 node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --sheet --frames 2.3,2.6 --trails --focus <id>   # those moments, with direction shown, close up (writes <name>.frames.png)
 ```
 
 - An error names the line of your script and suggests the fix.
 - **FIX THESE** are defects: resolve all. **CONSIDER** are judgement calls: act unless you have a reason.
-- The sheet shows the resting state first, then tokens in mid-flight and states just after they change. If you can view images, judge it against the quality bar. If you cannot, rely on the report and `--motion`, and keep the scene simple.
+- The sheet shows the resting state first, then tokens in mid-flight and states just after they change. If you can view images, judge it against the quality bar. If you cannot, read `--layout`: at the sheet's moments (or `--layout 2.5,6`) it lists every object, moving part and token with its place and size on screen, how much of it is hidden and by what, and how much of the frame the drawing fills.
 - **Check directions and timing; do not assume them.** The checker verifies layout, not meaning: it cannot know that a ring should lie flat or that a particle should go left. `--motion` prints, in words, when each step happens and where every moving part goes. `--trails` shows direction on the sheet. And a scene can state facts the build then proves: `s.expect(3, (at) => at('electron').x < 0, 'left of the nucleus at 3 s')`. [Checking](references/checking.md) is the procedure.
-- Raster outputs need a browser engine (Playwright, Puppeteer or any Chrome); video also needs ffmpeg. Without them the SVG and pages are still written.
+- **Video last.** Check timing on the sheet or with `--mp4 --draft` (640 px, 15 fps, seconds to render). Export the full-size video once, when the scene is final: a 1920-wide loop takes one to two minutes, so start it in the background if your tools allow and keep working.
 
 ### 10. Deliver
 
@@ -254,6 +262,7 @@ The best result is often something this file does not list. You are expected to 
 
 - **New objects.** `s.define` and `s.custom` build anything from shapes; `s.svg(markup, { at, w, h })` stands any drawing in the scene. Use them whenever the kit's nearest match would be a compromise. See [custom](references/custom.md).
 - **New motion.** Combine steps into behaviour the kit does not name: a queue that fills (`pop` hidden items as tokens arrive, `hide` them as they are taken), a machine that assembles (`grow` parts in turn), a handover (`move` an object between two places), a comparison (two zones running in parallel). Parts of your own objects move with `anim`: `blink`, `spin`, `march`, `ring`, `show` for details; `move`, `swing`, `orbit` and keyframed `keys` for parts that slide, lift, turn and wait.
+- **Hand-drawn scenes.** When the subject needs illustration the kit's solids cannot give (a bee, a landscape, an organ), draw it as flat SVG artwork and let the engine run it: `sh.raw` pieces in `s.draw`, placed with `unproj`, moved with keys, explained with `s.say`. [Custom](references/custom.md#hand-drawn-scenes) gives the method and its pitfalls, and `examples/water-cycle` is a whole scene made this way. The checker cannot see inside raw artwork, so judge it on the sheet.
 - **Ready-made pieces.** `sh.stream` (many particles on a path: charge in a wire, water in a pipe, air carrying sound), `sh.arrow` (a force or a direction), `sh.ripple` (rings spreading on a plane), `sh.glow` (a light), and `bar` and `readout` artwork for gauges and counters that change over time. All in [custom](references/custom.md).
 - **Experiences, not only loops.** `--experience step` lets a reader walk through the story one caption at a time; `scroll` ties the story to the page scroll; every object with `info` answers a hover or tap. Use them for teaching, onboarding and product tours. See [delivery](references/delivery.md).
 - **Series.** For several related pictures, keep the look, the `size` and the custom objects in one shared file and pass it as `scene({ series })`, so they read as chapters of one work. See [delivery](references/delivery.md#series).
@@ -295,14 +304,15 @@ Before you hand it over, every line must be true:
 - A `tile` icon built on diagonals (`check`, `x`, arrows): it lies flat and distorts. Use an upright `sign`.
 - Positions like `[1.3, 2.7]`. Stay on whole or half cells.
 - Inventing methods. A wrong name fails with a suggestion; the full list is in [api](references/api.md).
+- Shrinking the whole scene with `scale` to clear `phone-text`. The labels stay the same size and crowd a smaller drawing. Fold the layout into lanes, an L or a U, or leave the hint if the picture will not be read on a phone.
 
 ## Reference
 
 | File | Read it when |
 | --- | --- |
 | [references/design.md](references/design.md) | Choosing a look, composing with depth, pacing motion: the taste behind every decision |
-| [references/custom.md](references/custom.md) | The kit lacks the object, or you want your own artwork, moving parts, particles or a mechanism |
-| [references/checking.md](references/checking.md) | Anything moves in a direction, or a caption has to arrive with the thing it describes |
+| [references/custom.md](references/custom.md) | The kit lacks the object, or you want your own artwork, moving parts, particles, a mechanism or a hand-drawn scene |
+| [references/checking.md](references/checking.md) | Anything moves in a direction, a caption has to arrive with the thing it describes, or you cannot view images |
 | [references/api.md](references/api.md) | You need an option not shown above |
 | [references/kit.md](references/kit.md) | Choosing built-in objects, icons, screen content, tokens |
 | [references/recipes.md](references/recipes.md) | Using or adapting a recipe |

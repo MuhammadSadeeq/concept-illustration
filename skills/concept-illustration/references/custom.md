@@ -2,7 +2,7 @@
 
 The kit is a starting vocabulary. When the subject needs something it does not have (an oven, a syringe, a wind turbine, a product's own device), build it from the same shapes the kit is made of. A custom object gets the same lighting, shadows, labels and story steps as a built-in one.
 
-Contents: [three ways in](#three-ways-in) · [shapes](#shapes) · [artwork on faces](#artwork-on-faces) · [moving parts](#moving-parts) (mechanisms and vignettes) · [particles](#particles) · [your own SVG](#your-own-svg) · [worked examples](#worked-examples) · [making it look right](#making-it-look-right)
+Contents: [three ways in](#three-ways-in) · [shapes](#shapes) · [artwork on faces](#artwork-on-faces) · [moving parts](#moving-parts) (mechanisms and vignettes) · [particles](#particles) · [your own SVG](#your-own-svg) · [hand-drawn scenes](#hand-drawn-scenes) · [worked examples](#worked-examples) · [making it look right](#making-it-look-right)
 
 ## Three ways in
 
@@ -48,7 +48,7 @@ Coordinates inside a builder are in grid cells **relative to the object's own or
 | Ripples | `sh.ripple({ x, y, z, plane, r, count, period, color })` | Rings that spread and fade on a plane. `plane: 'top'` (default) lies them flat on the floor, the right choice for sound, water or a signal seen from above; `'left'` and `'right'` stand them on a wall, where they read as hoops |
 | Light | `sh.glow({ x, y, z, r, color, strength })` | A soft ball of light at a point: a lit lamp, a spark, a hot spot. `r` is its reach in cells. Give it `anim: { type: 'blink' }` to make it pulse |
 | Flat artwork | `sh.decal({ plane, at, items })` | Artwork lying on a plane anywhere in space |
-| Raw SVG | `sh.raw({ x, y, z, svg, w, h })` | Markup drawn in screen pixels around a point; not foreshortened |
+| Raw SVG | `sh.raw({ x, y, z, svg, w, d, h })` | Markup drawn in screen pixels around a point; not foreshortened. The engine cannot measure markup: `w`, `d`, `h` (cells) are the box it uses for depth order and the frame |
 
 Outline helpers for `prism` and `panel`: `sh.outline.rect(w, d, radius)`, `sh.outline.circle(r)`, `sh.outline.ngon(sides, r)`, `sh.outline.gear(r, teeth)`, `sh.outline.blob([[cx, cy, r], ...])` (the outer edge of overlapping circles: clouds, puddles, foliage).
 
@@ -218,6 +218,34 @@ Whole objects move with story steps (`s.move`, `s.lift`, `s.grow`, `s.pop`) and 
 `s.svg(markup, { at, w, h, label })` stands a drawing upright in the scene, facing the viewer. Draw it in a 100 × 100 box; it is scaled so that 100 units span `w` cells. It keeps its own colours and is not foreshortened, so it suits logos, characters, photographs traced to vector, or a hand-drawn hero.
 
 To lay your own artwork flat on a surface instead, use a `path` item on a face.
+
+## Hand-drawn scenes
+
+When the subject needs illustration that blocks and cylinders cannot give (a bee, a landscape, a heart, a character), draw the whole scene as flat SVG artwork and let the engine run it: the clock, the captions, `s.expect`, `--motion`, the sheet and the video all still work. `examples/water-cycle.scene.mjs` is a complete scene made this way.
+
+```js
+export default ({ scene, unproj }) => {
+  const T = 12;
+  const s = scene({ look: 'sky', floor: 'none', shadows: false, pad: 0, loop: T, title: '…' });
+  // markup in screen pixels, placed at screen point (x, y); the piece itself hangs from the origin with a tiny box
+  const art = (sh, svg, x = 0, y = 0, anim) => sh.raw({ svg: `<g transform="translate(${x} ${y})">${svg}</g>`, w: 0.01, d: 0.01, h: 0.01, anim });
+  // keys in seconds; move is a screen offset in pixels, turned into cells by unproj
+  const keys = (list) => ({ type: 'keys', period: T, keys: list.map(([t, dx = 0, dy = 0, opacity = 1]) => ({ t, move: unproj(dx, dy), opacity })) });
+  // the engine cannot measure markup, so mark the canvas corners, each in an s.draw of its own
+  for (const [x, y] of [[-320, -190], [320, 170]]) { const [a, b, z] = unproj(x, y); s.draw((sh) => [sh.raw({ svg: '', x: a, y: b, z, w: 0.01, d: 0.01, h: 0.01 })]); }
+  s.draw((sh) => [sh.group({ sort: false, parts: [art(sh, sky), art(sh, hills), art(sh, sea)] })]);            // back to front, in this order
+  s.draw((sh) => [art(sh, cloud, 200, -132, keys([[0, 0, 0, 0], [5, 0, 0, 1], [T, 0, 0, 1]]))], { layer: 'air' });
+  s.story([s.say('…', { at: 0 }), s.say('…', { at: 6 })]);
+  return s;
+};
+```
+
+- **Screen pixels in, cells out.** `unproj(sx, sy)` gives the world point drawn at a screen point; with no third argument it is linear, so it also turns a pixel offset into a `move`. `unproj(sx, sy, sy / 20)` gives the point on the floor (z = 0) drawn there, which suits particles running over the ground, such as an `sh.stream` river.
+- **Keep every piece's box small and at the origin**, and position the drawing inside its markup. A piece's box is what the frame and the depth order use. Two pieces far apart in one `s.draw` make one box reaching between them, and a box spanning opposite corners of the picture projects far outside it, so the frame fills with empty space.
+- **Order by layer and by group.** `layer: 'floor'` is drawn first, then `'sorted'`, then `'air'`. Inside a layer, `sh.group({ sort: false, parts })` draws its parts exactly as listed.
+- **Move with `anim` keys**, not with CSS written into the markup, so the motion runs on the scene clock and `--motion`, `s.expect` and video export follow it. Give the moving pieces a `name` to address them.
+- **Prefix ids inside markup** (`wc-sky`, not `sky`): gradients and clip paths share one page with everything else on it.
+- **The checker cannot see inside markup.** Its layout checks and `--layout` work from boxes, and they leave out `s.draw`. Judge a hand-drawn scene on the sheet. If you cannot view images, put the piece the story follows in `s.custom` with its box where it is drawn and about its size (`sh.raw({ svg, x, y, z, w, d, h, name, anim })` with `[x, y, z] = unproj(sx, sy)` and the markup drawn around `0, 0`), and `--layout` reports where it is at each moment.
 
 ## Worked examples
 

@@ -2,7 +2,7 @@
 
 The build checks layout by itself. It cannot check meaning: that a current flows the right way, that a ring lies flat, that a caption arrives with the thing it describes. Those are the mistakes that survive into finished work, so check them deliberately. None of this needs you to judge a small picture by eye.
 
-Contents: [what the build finds by itself](#what-the-build-finds-by-itself) · [the procedure](#the-procedure) · [reading the motion](#reading-the-motion) · [looking closely](#looking-closely) · [stating facts](#stating-facts) · [mistakes that keep happening](#mistakes-that-keep-happening)
+Contents: [what the build finds by itself](#what-the-build-finds-by-itself) · [the procedure](#the-procedure) · [reading the motion](#reading-the-motion) · [reading the layout](#reading-the-layout) · [looking closely](#looking-closely) · [stating facts](#stating-facts) · [mistakes that keep happening](#mistakes-that-keep-happening)
 
 ## What the build finds by itself
 
@@ -10,21 +10,24 @@ Every build prints a report. **FIX THESE** are defects; **CONSIDER** are judgeme
 
 | It finds | Code |
 | --- | --- |
-| Objects that intersect, links that run under objects or kink, labels that collide | `overlap` `link-through` `kink` `label-overlap` |
+| Objects that intersect, links that run under objects or kink, labels that collide (with what they sit on and the sides that are clear) | `overlap` `link-through` `kink` `label-overlap` |
 | Crowding, no focal point, nothing moving, hidden things never shown | `crowded` `no-hero` `static` `never-shown` |
 | A callout whose words sit on an object or on another callout | `callout-overlap` |
 | Captions too short to read or too long | `caption-rushed` `caption-long` |
 | A moving part that passes through another shape at some moment of the loop | `passes-through` |
 | An object moved with `s.move` that ends up in front of something it is drawn behind, or the reverse | `move-depth` |
 | A story longer than the `loop` that was asked for | `loop-longer` |
-| Text on a face too small to read; labels that will be tiny on a phone | `text-small` `phone-text` |
+| A token or moving part that carries the story across the picture but is too small to follow (under 3.5 % of the picture's width) | `small-subject` |
+| More than 3 s in which nothing visibly moves, or an end held still for more than 4 s | `still` |
+| A custom object whose shapes sit far from its origin, so its plate, links and shadow are bigger than it is | `off-centre` |
+| Text on a face too small to read; labels that will be tiny on a phone (a picture over 840 px wide that has words in it) | `text-small` `phone-text` |
 | A file much larger than usual, and what it is made of | `large` |
 | A fact you stated with `s.expect` that is not true | `expect` |
 
 ## The procedure
 
 1. Build with `--sheet` and clear everything under FIX THESE.
-2. Run `--motion` and read it against your visual sentence: is each thing going the way the sentence says, and does each caption start when its subject does?
+2. Run `--motion` and read it against your visual sentence: is each thing going the way the sentence says, and does each caption start when its subject does? If you cannot view the sheet, also read `--layout`.
 3. For anything that turns, flows or travels in a direction that matters, look at it with `--trails`, at the moment it matters, close up.
 4. Write down the two or three facts the picture depends on as `s.expect` lines and leave them in the script. They are checked on every build from then on.
 
@@ -54,6 +57,26 @@ MOTION  (scene clock: 0 s is when the story starts. +x is toward the lower right
 ```
 
 Positions are in cells. Give the shapes that matter a `name: '…'` so the report can call them something better than `shape#3`.
+
+## Reading the layout
+
+```bash
+node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --layout            # at the sheet's moments
+node SKILL_DIR/scripts/build.mjs <name>.scene.mjs --layout 2.5,6.4    # at these moments
+```
+
+```
+LAYOUT  (the picture is 833×507 px without the caption strip; x from its left edge, y from its top; size is the larger side as a share of the picture's width)
+
+  at 6.00 s   caption: "The sickest is treated first"
+    triageDesk3 "Assessment"       x 384–495  y 75–207  size 16 %
+    slab4 "Red"                    x 536–647  y 177–247  size 13 %  48 % hidden behind a token, bay7
+    bay7 "Resus bay"               x 627–716  y 171–283  size 13 %
+    the user token                 x 594–668  y 152–259  size 13 %  19 % hidden behind bay7
+    the drawing spans x 26 %–85 %, y 17 %–78 % of the picture, and its shapes cover 13 % of it
+```
+
+This is the sheet in words, for when you cannot look at it. Each object, each moving part (named or not) and each token in flight is listed with its box on the final picture, its size, its opacity while it fades, and how much of it is hidden and by what. A thing outside the frame or cut by its edge is marked. With the camera zoomed in, the boxes are where the zoom puts them. Use it to answer the questions a picture answers: is the thing the caption names visible now, is the traveller big enough to follow, is the hero in front, does the drawing fill the frame. Boxes are the outlines of the shapes, so artwork drawn as raw SVG counts only as the box it was given, and drawings made with `s.draw` are not listed.
 
 ## Looking closely
 

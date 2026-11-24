@@ -209,14 +209,16 @@ For a scene that must sit on an arbitrary surface, build with `background: false
 
 ```bash
 node SKILL_DIR/scripts/build.mjs cache.scene.mjs --png --at 4 --scale 2    # still at 4 s, 2× density
-node SKILL_DIR/scripts/build.mjs cache.scene.mjs --mp4 --width 1920        # one loop, 30 fps
+node SKILL_DIR/scripts/build.mjs cache.scene.mjs --mp4 --draft             # 640 wide, 15 fps, a few seconds: check timing
+node SKILL_DIR/scripts/build.mjs cache.scene.mjs --mp4 --width 1920        # one loop, 30 fps: export once, when the scene is final
 node SKILL_DIR/scripts/build.mjs cache.scene.mjs --gif --width 800         # for places that accept only GIF
 node SKILL_DIR/scripts/build.mjs cache.scene.mjs --webm                    # keeps transparency when background: false
 ```
 
 - Video frames are captured by seeking the animation, not by recording the screen, so they are exact and the loop closes without a jump. Add `--loops 2` to repeat, `--intro` to include the entrance.
 - Pick `--at` for a poster where the story is at its most informative moment, usually just before the result.
-- Raster output needs a browser engine. The tool looks for Playwright or Puppeteer in the project, then for a Chrome, Chromium or Edge binary (`CHROME_PATH` overrides). Video additionally needs `ffmpeg`. If neither is present, deliver the SVG and say so; do not fake a raster.
+- A 1920-wide loop of 10 s takes one to two minutes; the build prints how long. Run it in the background when your tools allow and keep working.
+- Raster output needs any Chrome, Chromium or Edge binary (`CHROME_PATH` overrides; see the `Render setup:` line of the first build). Video additionally needs `ffmpeg`. If neither is present, deliver the SVG and say so; do not fake a raster.
 
 ## Accessibility
 
